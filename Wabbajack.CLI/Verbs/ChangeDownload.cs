@@ -41,7 +41,7 @@ namespace Wabbajack.CLI.Verbs
 
         public AbsolutePath Mods => (AbsolutePath)_mods;
 
-        [Option("copy", Default = true, HelpText = "Whether to copy the files", SetName = "copy")]
+        [Option("copy", Default = false, HelpText = "Whether to copy the files", SetName = "copy")]
         public bool Copy { get; set; }
 
         [Option("move", Default = false, HelpText = "Whether to move the files", SetName = "move")]
