@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -11,12 +12,27 @@ namespace Wabbajack.Server.Services
     public class QuickSync
     {
         private Dictionary<Type, CancellationTokenSource> _syncs = new Dictionary<Type, CancellationTokenSource>();
+        private Dictionary<Type, IReportingService> _services = new Dictionary<Type, IReportingService>();
         private AsyncLock _lock = new AsyncLock();
         private ILogger<QuickSync> _logger;
 
         public QuickSync(ILogger<QuickSync> logger)
         {
             _logger = logger;
+        }
+
+        public async Task<Dictionary<Type, (TimeSpan Delay, TimeSpan LastRunTime, (String, DateTime)[] ActiveWork)>> Report()
+        {
+            using var _ = await _lock.WaitAsync();
+            return _services.ToDictionary(s => s.Key,
+                s => (s.Value.Delay, DateTime.UtcNow - s.Value.LastEnd, s.Value.ActiveWorkStatus));
+        }
+
+        public async Task Register<T>(T service)
+        where T : IReportingService
+        {
+            using var _ = await _lock.WaitAsync();
+            _services[service.GetType()] = service;
         }
 
         public async Task<CancellationToken> GetToken<T>()
@@ -47,6 +63,17 @@ namespace Wabbajack.Server.Services
             // Needs debugging
             using var _ = await _lock.WaitAsync();
             if (_syncs.TryGetValue(typeof(T), out var ct))
+            {
+                ct.Cancel();
+            }
+        }
+        
+        public async Task Notify(Type t)
+        {
+            _logger.LogInformation($"Quicksync {t.Name}");
+            // Needs debugging
+            using var _ = await _lock.WaitAsync();
+            if (_syncs.TryGetValue(t, out var ct))
             {
                 ct.Cancel();
             }

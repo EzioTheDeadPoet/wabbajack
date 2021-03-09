@@ -1,4 +1,5 @@
-﻿using System.Threading.Tasks;
+﻿using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Wabbajack.Common;
 using Wabbajack.Common.Serialization.Json;
@@ -27,12 +28,13 @@ namespace Wabbajack.Lib.Downloaders
 
             var fp = filePath.Value;
             var hash = await fp.FileHashCachedAsync();
+            if (hash == null) return null;
 
             return new State(game.InstalledVersion)
             {
                 Game = game.Game, 
                 GameFile = (RelativePath)gameFile,
-                Hash = hash
+                Hash = hash.Value
             };
         }
 
@@ -62,7 +64,7 @@ namespace Wabbajack.Lib.Downloaders
             internal AbsolutePath SourcePath => Game.MetaData().GameLocation().Combine(GameFile);
 
             [JsonIgnore]
-            public override object[] PrimaryKey { get => new object[] {Game, GameVersion, GameFile}; }
+            public override object[] PrimaryKey { get => new object[] {Game, GameVersion ?? "0.0.0.0", GameFile.ToString().ToLowerInvariant()}; }
 
             public override bool IsWhitelisted(ServerWhitelist whitelist)
             {
@@ -79,7 +81,7 @@ namespace Wabbajack.Lib.Downloaders
                 return true;
             }
 
-            public override async Task<bool> Verify(Archive a)
+            public override async Task<bool> Verify(Archive a, CancellationToken? token)
             {
                 return SourcePath.Exists && await SourcePath.FileHashCachedAsync() == Hash;
             }
@@ -96,7 +98,10 @@ namespace Wabbajack.Lib.Downloaders
 
             public override string[] GetMetaIni()
             {
-                return new[] {"[General]", $"gameName={Game.MetaData().MO2ArchiveName}", $"gameFile={GameFile}"};
+                var meta = Game.MetaData();
+                //using MO2Name instead of MO2ArchiveName because Skyrim VR and Fallout 4 VR have the same archive name
+                //as their non-vr counterpart.
+                return new[] {"[General]", $"gameName={meta.MO2Name ?? meta.Game.ToString()}", $"gameFile={GameFile}"};
             }
 
         }

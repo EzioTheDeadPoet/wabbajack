@@ -125,7 +125,7 @@ namespace Wabbajack.Server.Services
 
         private static string PatchName(Hash oldHash, Hash newHash)
         {
-            return $"\\{oldHash.ToHex()}_{newHash.ToHex()}";
+            return $"{oldHash.ToHex()}_{newHash.ToHex()}";
         }
 
         private async Task CleanupOldPatches()
@@ -170,11 +170,11 @@ namespace Wabbajack.Server.Services
                         var lst = p.Split("_", StringSplitOptions.RemoveEmptyEntries).Select(Hash.FromHex).ToArray();
                         return (lst[0], lst[1]);
                     }
-                    catch (ArgumentException ex)
+                    catch (ArgumentException)
                     {
                         return default;
                     }
-                    catch (FormatException ex)
+                    catch (FormatException)
                     {
                         return default;
                     }

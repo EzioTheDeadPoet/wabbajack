@@ -1,32 +1,31 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
-      <TargetFramework>netcoreapp3.1</TargetFramework>
+      <TargetFramework>net5.0-windows</TargetFramework>
       <Platforms>x64</Platforms>
       <RuntimeIdentifier>win10-x64</RuntimeIdentifier>
       <Nullable>enable</Nullable>
     </PropertyGroup>
     <ItemGroup>
       <PackageReference Include="CefSharp.Common">
-        <Version>84.4.10</Version>
+        <Version>87.1.132</Version>
       </PackageReference>
       <PackageReference Include="CefSharp.OffScreen">
-        <Version>84.4.10</Version>
+        <Version>87.1.132</Version>
       </PackageReference>
       <PackageReference Include="F23.StringSimilarity">
         <Version>3.1.0</Version>
       </PackageReference>
       <PackageReference Include="Fody">
-        <Version>6.2.4</Version>
+        <Version>6.3.0</Version>
+        <PrivateAssets>all</PrivateAssets>
+        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       </PackageReference>
       <PackageReference Include="Genbox.AlphaFS">
         <Version>2.2.2.1</Version>
       </PackageReference>
-      <PackageReference Include="GraphQL.Client">
-        <Version>3.1.6</Version>
-      </PackageReference>
       <PackageReference Include="HtmlAgilityPack">
-        <Version>1.11.24</Version>
+        <Version>1.11.30</Version>
       </PackageReference>
       <PackageReference Include="MegaApiClient">
         <Version>1.8.2</Version>
@@ -38,25 +37,25 @@
         <Version>2.1.1</Version>
       </PackageReference>
       <PackageReference Include="ReactiveUI">
-        <Version>11.5.35</Version>
+        <Version>13.1.1</Version>
       </PackageReference>
       <PackageReference Include="ReactiveUI.Fody">
-        <Version>11.5.35</Version>
+        <Version>13.1.1</Version>
       </PackageReference>
       <PackageReference Include="SharpCompress">
-        <Version>0.26.0</Version>
+        <Version>0.28.1</Version>
       </PackageReference>
       <PackageReference Include="System.Collections.Immutable">
-        <Version>5.0.0-preview.8.20407.11</Version>
+        <Version>5.0.0</Version>
       </PackageReference>
       <PackageReference Include="System.Drawing.Common">
-        <Version>5.0.0-preview.8.20407.11</Version>
+        <Version>5.0.1</Version>
       </PackageReference>
       <PackageReference Include="System.Net.Http">
         <Version>4.3.4</Version>
       </PackageReference>
       <PackageReference Include="System.ServiceModel.Syndication">
-        <Version>5.0.0-preview.8.20407.11</Version>
+        <Version>5.0.0</Version>
       </PackageReference>
       <PackageReference Include="WebSocketSharp-netstandard">
         <Version>1.0.1</Version>
@@ -66,9 +65,6 @@
       </PackageReference>
       <PackageReference Include="YamlDotNet.NetCore">
         <Version>1.0.0</Version>
-      </PackageReference>
-      <PackageReference Include="YoutubeExplode">
-        <Version>5.1.4</Version>
       </PackageReference>
     </ItemGroup>
     <ItemGroup>
@@ -99,9 +95,5 @@
       <None Update="concrt140.dll">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>
-    </ItemGroup>
-    <ItemGroup>
-      <Folder Include="Downloaders\BethesdaNet" />
-      <Folder Include="Downloaders\Converters" />
     </ItemGroup>
 </Project>

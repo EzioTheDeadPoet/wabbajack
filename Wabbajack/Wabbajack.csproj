@@ -2,12 +2,12 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>netcoreapp3.1</TargetFramework>
+    <TargetFramework>net5.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <Platforms>x64</Platforms>
     <RuntimeIdentifier>win10-x64</RuntimeIdentifier>
-      <AssemblyVersion>2.2.2.0</AssemblyVersion>
-      <FileVersion>2.2.2.0</FileVersion>
+      <AssemblyVersion>2.4.2.6</AssemblyVersion>
+      <FileVersion>2.4.2.6</FileVersion>
     <Copyright>Copyright © 2019-2020</Copyright>
     <Description>An automated ModList installer</Description>
     <PublishReadyToRun>true</PublishReadyToRun>
@@ -55,25 +55,25 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="CefSharp.Wpf" Version="84.4.10" />
-    <PackageReference Include="DynamicData" Version="6.16.8" />
-    <PackageReference Include="Extended.Wpf.Toolkit" Version="4.0.1" />
-    <PackageReference Include="Fody" Version="6.2.4">
+    <PackageReference Include="CefSharp.Wpf" Version="87.1.132" />
+    <PackageReference Include="DynamicData" Version="7.1.1" />
+    <PackageReference Include="Extended.Wpf.Toolkit" Version="4.0.2" />
+    <PackageReference Include="Fody" Version="6.3.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Genbox.AlphaFS" Version="2.2.2.1" />
-    <PackageReference Include="GitInfo" Version="2.0.33">
+    <PackageReference Include="GitInfo" Version="2.1.2">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="MahApps.Metro" Version="2.2.0" />
-    <PackageReference Include="MahApps.Metro.IconPacks" Version="4.4.0" />
-    <PackageReference Include="PInvoke.Gdi32" Version="0.6.49" />
-    <PackageReference Include="PInvoke.User32" Version="0.6.49" />
-    <PackageReference Include="ReactiveUI" Version="11.5.35" />
-    <PackageReference Include="ReactiveUI.Fody" Version="11.5.35" />
-    <PackageReference Include="ReactiveUI.WPF" Version="11.5.35" />
+    <PackageReference Include="MahApps.Metro" Version="2.4.3" />
+    <PackageReference Include="MahApps.Metro.IconPacks" Version="4.8.0" />
+    <PackageReference Include="PInvoke.Gdi32" Version="0.7.104" />
+    <PackageReference Include="PInvoke.User32" Version="0.7.104" />
+    <PackageReference Include="ReactiveUI" Version="13.1.1" />
+    <PackageReference Include="ReactiveUI.Fody" Version="13.1.1" />
+    <PackageReference Include="ReactiveUI.WPF" Version="13.1.1" />
     <PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
     <PackageReference Include="WindowsAPICodePack-Shell" Version="1.1.1" />
     <PackageReference Include="WPFThemes.DarkBlend" Version="1.0.8" />
@@ -87,8 +87,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Resource Include="Resources\GameGridIcons\Fallout4.png" />
-    <Resource Include="Resources\GameGridIcons\SkyrimSpecialEdition.png" />
     <Resource Include="Resources\middle_mouse_button.png" />
     <Resource Include="Resources\MO2Button.png" />
     <Resource Include="Resources\VortexButton.png" />

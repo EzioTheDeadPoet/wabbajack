@@ -1,6 +1,7 @@
 ﻿using System.IO;
 using System.Linq;
 using System.Reactive.Subjects;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Wabbajack.Common;
@@ -12,11 +13,6 @@ namespace Wabbajack.Lib.Downloaders
 {
     public class ManualDownloader : IDownloader
     {
-        private FileSystemWatcher _watcher;
-        private Subject<FileEvent> _fileEvents = new Subject<FileEvent>();
-        private KnownFolder _downloadfolder;
-        public readonly AsyncLock Lock = new AsyncLock();
-
         class FileEvent
         {
             public string FullPath { get; set; } = string.Empty;
@@ -26,36 +22,6 @@ namespace Wabbajack.Lib.Downloaders
 
         public ManualDownloader()
         {
-            _downloadfolder = new KnownFolder(KnownFolderType.Downloads);
-            _watcher = new FileSystemWatcher(_downloadfolder.Path);
-            _watcher.Created += _watcher_Created;
-            _watcher.Changed += _watcher_Changed;
-        }
-
-        private void _watcher_Changed(object sender, FileSystemEventArgs e)
-        {
-            PublishEvent(e);
-        }
-        private void _watcher_Created(object sender, FileSystemEventArgs e)
-        {
-            PublishEvent(e);
-        }
-
-        private void PublishEvent(FileSystemEventArgs e)
-        {
-            try
-            {
-                _fileEvents.OnNext(new FileEvent
-                {
-                    Size = new FileInfo(e.FullPath).Length,
-                    Name = e.Name,
-                    FullPath = e.FullPath
-                });
-            }
-            catch (IOException)
-            {
-
-            }
         }
 
         public async Task<AbstractDownloadState?> GetDownloaderState(dynamic archiveINI, bool quickMode)
@@ -67,12 +33,12 @@ namespace Wabbajack.Lib.Downloaders
         public async Task Prepare()
         {
         }
-        
+
         [JsonName("ManualDownloader")]
         public class State : AbstractDownloadState
         {
             public string Url { get; }
-            
+
             [JsonIgnore]
             public override object[] PrimaryKey => new object[] { Url };
 
@@ -93,7 +59,7 @@ namespace Wabbajack.Lib.Downloaders
                 return await state.Download(a, destination);
             }
 
-            public override async Task<bool> Verify(Archive a)
+            public override async Task<bool> Verify(Archive a, CancellationToken? token)
             {
                 return true;
             }
@@ -110,7 +76,7 @@ namespace Wabbajack.Lib.Downloaders
 
             public override string[] GetMetaIni()
             {
-                return new [] 
+                return new []
                 {
                     "[General]",
                     $"manualURL={Url}",

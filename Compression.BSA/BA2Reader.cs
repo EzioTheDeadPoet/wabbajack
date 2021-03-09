@@ -27,7 +27,6 @@ namespace Compression.BSA
 
     public class BA2Reader : IBSAReader
     {
-        internal AbsolutePath _filename;
         private Stream _stream;
         internal BinaryReader _rdr;
         internal uint _version;
@@ -35,15 +34,16 @@ namespace Compression.BSA
         internal EntryType _type;
         internal uint _numFiles;
         internal ulong _nameTableOffset;
+        public IStreamFactory _streamFactory;
         public bool UseATIFourCC { get; set; } = false;
 
         public bool HasNameTable => _nameTableOffset > 0;
 
         
         
-        public static async Task<BA2Reader> Load(AbsolutePath filename)
+        public static async Task<BA2Reader> Load(IStreamFactory streamFactory)
         {
-            var rdr = new BA2Reader(await filename.OpenShared()) {_filename = filename};
+            var rdr = new BA2Reader(await streamFactory.GetStream()) {_streamFactory = streamFactory};
             await rdr.LoadHeaders();
             return rdr;
         }
@@ -101,13 +101,9 @@ namespace Compression.BSA
                     file.FullPath = Encoding.UTF8.GetString(_rdr.ReadBytes(_rdr.ReadInt16()));
             }
             Files = files;
-
-        }
-
-        public async ValueTask DisposeAsync()
-        {
             _stream?.Dispose();
-            _rdr?.Dispose();
+            _rdr.Dispose();
+
         }
 
         public IEnumerable<IFile> Files { get; private set; }
@@ -206,7 +202,7 @@ namespace Compression.BSA
 
             WriteHeader(bw);
 
-            await using var fs = await _bsa._filename.OpenRead();
+            await using var fs = await _bsa._streamFactory.GetStream();
             using var br = new BinaryReader(fs);
             foreach (var chunk in _chunks)
             {
@@ -343,6 +339,14 @@ namespace Compression.BSA
                     dxt10.Write(bw);
                     break;
             }
+        }
+        
+        public async ValueTask<IStreamFactory> GetStreamFactory()
+        {
+            var ms = new MemoryStream();
+            await CopyDataTo(ms);
+            ms.Position = 0;
+            return new MemoryStreamFactory(ms, Path);
         }
     }
 
@@ -483,7 +487,7 @@ namespace Compression.BSA
 
         public async ValueTask CopyDataTo(Stream output)
         {
-            await using var fs = await _bsa._filename.OpenRead();
+            await using var fs = await _bsa._streamFactory.GetStream();
             fs.Seek((long) _offset, SeekOrigin.Begin);
             uint len = Compressed ? _size : _realSize;
 
@@ -502,6 +506,14 @@ namespace Compression.BSA
                 inflater.Inflate(uncompressed);
                 await output.WriteAsync(uncompressed, 0, uncompressed.Length);
             }
+        }
+        
+        public async ValueTask<IStreamFactory> GetStreamFactory()
+        {
+            var ms = new MemoryStream();
+            await CopyDataTo(ms);
+            ms.Position = 0;
+            return new MemoryStreamFactory(ms, Path);
         }
     }
 

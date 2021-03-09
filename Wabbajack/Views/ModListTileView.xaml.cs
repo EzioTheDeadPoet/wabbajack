@@ -36,12 +36,19 @@ namespace Wabbajack
                     .Select(p => p.Value)
                     .BindToStrict(this, x => x.DownloadProgressBar.Value)
                     .DisposeWith(dispose);
-                this.WhenAny(x => x.ViewModel.Metadata.Title)
+                this.WhenAny(x => x.ViewModel.Metadata)
+                    .CombineLatest(this.WhenAny(x => x.ViewModel.IsBroken))
+                    .Where(x => !x.First.ImageContainsTitle || x.Second)
+                    .Select(x => x.First.Title)
                     .BindToStrict(this, x => x.DescriptionTextShadow.Text)
                     .DisposeWith(dispose);
-                this.WhenAny(x => x.ViewModel.Metadata.Title)
+                this.WhenAny(x => x.ViewModel.Metadata)
+                    .CombineLatest(this.WhenAny(x => x.ViewModel.IsBroken))
+                    .Where(x => !x.First.ImageContainsTitle || x.Second)
+                    .Select(x => x.First.Title)
                     .BindToStrict(this, x => x.ModListTitleShadow.Text)
                     .DisposeWith(dispose);
+
                 this.WhenAny(x => x.ViewModel.IsBroken)
                     .Select(x => x ? Visibility.Visible : Visibility.Collapsed)
                     .BindToStrict(this, x => x.Overlay.Visibility)

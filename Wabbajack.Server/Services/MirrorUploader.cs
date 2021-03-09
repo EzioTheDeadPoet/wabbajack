@@ -1,10 +1,13 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
 using FluentFTP;
 using Microsoft.Extensions.Logging;
+using Org.BouncyCastle.Utilities.Collections;
 using Wabbajack.BuildServer;
 using Wabbajack.BuildServer.Controllers;
 using Wabbajack.Common;
@@ -20,11 +23,14 @@ namespace Wabbajack.Server.Services
     {
         private SqlService _sql;
         private ArchiveMaintainer _archives;
+        private DiscordWebHook _discord;
 
-        public MirrorUploader(ILogger<MirrorUploader> logger, AppSettings settings, SqlService sql, QuickSync quickSync, ArchiveMaintainer archives) : base(logger, settings, quickSync, TimeSpan.FromHours(1))
+        public MirrorUploader(ILogger<MirrorUploader> logger, AppSettings settings, SqlService sql, QuickSync quickSync, ArchiveMaintainer archives, DiscordWebHook discord)
+            : base(logger, settings, quickSync, TimeSpan.FromHours(1))
         {
             _sql = sql;
             _archives = archives;
+            _discord = discord;
         }
 
         public override async Task<int> Execute()
@@ -38,14 +44,34 @@ namespace Wabbajack.Server.Services
 
             try
             {
+                var creds = await BunnyCdnFtpInfo.GetCreds(StorageSpace.Mirrors);
+
                 using var queue = new WorkQueue();
                 if (_archives.TryGetPath(toUpload.Hash, out var path))
                 {
                     _logger.LogInformation($"Uploading mirror file {toUpload.Hash} {path.Size.FileSizeToString()}");
 
+                    bool exists = false;
+                    using (var client = await GetClient(creds))
+                    {
+                        exists = await client.FileExistsAsync($"{toUpload.Hash.ToHex()}/definition.json.gz");
+                    }
+                    
+                    if (exists)
+                    {
+                        _logger.LogInformation($"Skipping {toUpload.Hash} it's already on the server");
+                        await toUpload.Finish(_sql);
+                        goto TOP;
+                    }
+
+                    await _discord.Send(Channel.Spam,
+                        new DiscordMessage
+                        {
+                            Content = $"Uploading {toUpload.Hash} - {toUpload.Created} because {toUpload.Rationale}"
+                        });
+
                     var definition = await Client.GenerateFileDefinition(queue, path, (s, percent) => { });
 
-                    var creds = await BunnyCdnFtpInfo.GetCreds(StorageSpace.Mirrors);
                     using (var client = await GetClient(creds))
                     {
                         await client.CreateDirectoryAsync($"{definition.Hash.ToHex()}");
@@ -60,7 +86,7 @@ namespace Wabbajack.Server.Services
                     await definition.Parts.PMap(queue, async part =>
                     {
                         _logger.LogInformation($"Uploading mirror part ({part.Index}/{definition.Parts.Length})");
-                        var name = MakePath(part.Index);
+
                         var buffer = new byte[part.Size];
                         await using (var fs = await path.OpenShared())
                         {
@@ -69,7 +95,9 @@ namespace Wabbajack.Server.Services
                         }
 
                         using var client = await GetClient(creds);
+                        var name = MakePath(part.Index);
                         await client.UploadAsync(new MemoryStream(buffer), name);
+                        
                     });
 
                     using (var client = await GetClient(creds))
@@ -82,7 +110,8 @@ namespace Wabbajack.Server.Services
                         }
 
                         ms.Position = 0;
-                        await client.UploadAsync(ms, $"{definition.Hash.ToHex()}/definition.json.gz");
+                        var remoteName = $"{definition.Hash.ToHex()}/definition.json.gz";
+                        await client.UploadAsync(ms, remoteName);
                     }
 
                     await toUpload.Finish(_sql);

@@ -13,8 +13,9 @@ using System.Threading.Tasks;
 using Wabbajack.Common.Exceptions;
 using Wabbajack.Common.Serialization.Json;
 using Wabbajack.Lib.Downloaders;
- 
-namespace Wabbajack.Lib
+ using Wabbajack.Lib.LibCefHelpers;
+
+ namespace Wabbajack.Lib
 {
     public static class BuildServerStatus
     {
@@ -156,9 +157,7 @@ namespace Wabbajack.Lib
                 return new Archive[0];
             var client = await GetClient();
             var metaData = game.MetaData();
-            var results =
-                await client.GetJsonAsync<Archive[]>(
-                    $"{Consts.WabbajackBuildServerUri}game_files/{game}/{metaData.InstalledVersion}");
+            var results = await GetGameFilesFromGithub(game, metaData.InstalledVersion);
 
             return (await results.PMap(queue, async file => (await file.State.Verify(file), file))).Where(f => f.Item1)
                 .Select(f =>
@@ -167,6 +166,22 @@ namespace Wabbajack.Lib
                     return f.file;
                 })
                 .ToArray();
+        }
+        
+        public static async Task<Archive[]> GetGameFilesFromGithub(Game game, string version)
+        {
+            var url =
+                $"https://raw.githubusercontent.com/wabbajack-tools/indexed-game-files/master/{game}/{version}.json";
+            Utils.Log($"Loading game file definition from {url}");
+            var client = await GetClient();
+            return await client.GetJsonAsync<Archive[]>(url);
+        }
+
+        public static async Task<Archive[]> GetGameFilesFromServer(Game game, string version)
+        {
+            var client = await GetClient();
+            return await client.GetJsonAsync<Archive[]>(
+                $"{Consts.WabbajackBuildServerUri}game_files/{game}/{version}");
         }
 
         public static async Task<AbstractDownloadState?> InferDownloadState(Hash hash)
@@ -195,6 +210,15 @@ namespace Wabbajack.Lib
             return null;
         }
 
+        public static async Task<Archive[]> InferAllDownloadStates(Hash hash)
+        {
+            var client = await GetClient();
+
+            var results = await client.GetJsonAsync<Archive[]>(
+                $"{Consts.WabbajackBuildServerUri}mod_files/by_hash/{hash.ToHex()}");
+            return results;
+        }
+
         public static async Task<Archive[]> GetModUpgrades(Hash src)
         {
             var client = await GetClient();
@@ -218,8 +242,12 @@ namespace Wabbajack.Lib
             Utils.Log($"Checking virus result for {path}");
 
             var hash = await path.FileHashAsync();
+            if (hash == null)
+            {
+                throw new Exception("Hash is null!");
+            }
 
-            using var result = await client.GetAsync($"{Consts.WabbajackBuildServerUri}virus_scan/{hash.ToHex()}", errorsAsExceptions: false);
+            using var result = await client.GetAsync($"{Consts.WabbajackBuildServerUri}virus_scan/{hash.Value.ToHex()}", errorsAsExceptions: false);
             if (result.StatusCode == HttpStatusCode.OK)
             {
                 var data = await result.Content.ReadAsStringAsync();
@@ -249,10 +277,26 @@ namespace Wabbajack.Lib
                     await client.GetStringAsync($"{Consts.WabbajackBuildServerUri}mirror/{archiveHash.ToHex()}");
                 return new Uri(result);
             }
-            catch (HttpException ex)
+            catch (HttpException)
             {
                 return null;
             }
+        }
+
+        public static async Task<Helpers.Cookie[]> GetAuthInfo<T>(string key)
+        {
+            var client = await GetClient();
+            return await client.GetJsonAsync<Helpers.Cookie[]>(
+                $"{Consts.WabbajackBuildServerUri}site-integration/auth-info/{key}");
+        }
+
+        public static async Task<IEnumerable<(Game, string)>> GetServerGamesAndVersions()
+        {
+            var client = await GetClient();
+            var results =
+                await client.GetJsonAsync<(Game, string)[]>(
+                    $"{Consts.WabbajackBuildServerUri}game_files");
+            return results;
         }
     }
 }

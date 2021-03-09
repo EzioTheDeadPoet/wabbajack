@@ -4,11 +4,15 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Net.Http.Headers;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
 using Wabbajack.Common.StoreHandlers;
 
 namespace Wabbajack.Common
 {
-    public enum Game 
+    [JsonConverter(typeof(StringEnumConverter))]
+    public enum Game
     {
         //MO2 GAMES
         Morrowind,
@@ -31,9 +35,27 @@ namespace Wabbajack.Common
         //MO2 Non-BGS Games
         [Description("Darkest Dungeon")]
         DarkestDungeon,
+        Dishonored,
+        [Description("Witcher 3")]
         Witcher3,
         [Description("Stardew Valley")]
-        StardewValley
+        StardewValley,
+        [Description("Kingdom Come: Deliverance")]
+        KingdomComeDeliverance,
+        [Description("MechWarrior 5: Mercenaries")]
+        MechWarrior5Mercenaries,
+        [Description("No Man's Sky")]
+        NoMansSky,
+        [Description("Dragon Age: Origins")]
+        DragonAgeOrigins,
+        [Description("Dragon Age 2")]
+        DragonAge2,
+        [Description("Dragon Age: Inquisition")]
+        DragonAgeInquisition,
+        [Description("Kerbal Space Program")]
+        KerbalSpaceProgram,
+        [Description("Enderal Special Edition")]
+        EnderalSpecialEdition
     }
 
     public static class GameExtensions
@@ -62,6 +84,14 @@ namespace Wabbajack.Common
 
         // to get gog ids: https://www.gogdb.org
         public List<int>? GOGIDs { get; internal set; }
+
+        // to get these ids, split the numbers from the letters in file names found in
+        // C:\ProgramData\Origin\LocalContent\{game name)\*.mfst
+        // So for DA:O this is "DR208591800.mfst" -> "DR:208591800"
+        // EAPlay games may have @subscription appended to the file name
+        public List<string> OriginIDs { get; set; } = new();
+
+        public List<string> EpicGameStoreIDs { get; internal set; } = new List<string>();
 
         // to get BethNet IDs: check the registry
         public int BethNetID { get; internal set; }
@@ -94,7 +124,16 @@ namespace Wabbajack.Common
                 if (MainExecutable == null)
                     throw new NotImplementedException();
 
-                return FileVersionInfo.GetVersionInfo((string)gameLoc.Combine(MainExecutable)).ProductVersion;
+                var info = FileVersionInfo.GetVersionInfo((string)gameLoc.Combine(MainExecutable));
+                var version =  info.ProductVersion;
+                if (string.IsNullOrWhiteSpace(version))
+                {
+                    version =
+                        $"{info.ProductMajorPart}.{info.ProductMinorPart}.{info.ProductBuildPart}.{info.ProductPrivatePart}";
+                    return version;
+                }
+
+                return version;
             }
         }
 
@@ -112,7 +151,7 @@ namespace Wabbajack.Common
                 path = _cachedPath;
                 return true;
             }
-            
+
             var ret = TryGetGameLocation();
             if (ret != null)
             {
@@ -139,7 +178,7 @@ namespace Wabbajack.Common
         {
         }
     }
-    
+
     public static class EnumExtensions
     {
         public static string GetDescription<T>(this T enumerationValue)
@@ -167,18 +206,18 @@ namespace Wabbajack.Common
 
     public class GameRegistry
     {
-        public static GameMetaData GetByMO2ArchiveName(string gameName)
+        public static GameMetaData? GetByMO2ArchiveName(string gameName)
         {
             gameName = gameName.ToLower();
             return Games.Values.FirstOrDefault(g => g.MO2ArchiveName?.ToLower() == gameName);
         }
 
-        public static GameMetaData GetByNexusName(string gameName)
+        public static GameMetaData? GetByNexusName(string gameName)
         {
             return Games.Values.FirstOrDefault(g => g.NexusName == gameName.ToLower());
         }
 
-        public static GameMetaData GetBySteamID(int id)
+        public static GameMetaData? GetBySteamID(int id)
         {
             return Games.Values
                 .FirstOrDefault(g => g.SteamIDs != null && g.SteamIDs.Count > 0 && g.SteamIDs.Any(i => i == id));
@@ -209,7 +248,7 @@ namespace Wabbajack.Common
 
             result = GetByMO2ArchiveName(someName);
             if (result != null) return result;
-            
+
             result = GetByMO2Name(someName);
             if (result != null) return result;
 
@@ -400,7 +439,26 @@ namespace Wabbajack.Common
                     {
                         "TESV.exe"
                     },
-                    MainExecutable = "TESV.exe"
+                    MainExecutable = "TESV.exe",
+                    CommonlyConfusedWith = new []{Game.EnderalSpecialEdition},
+                }
+            },
+            {
+                Game.EnderalSpecialEdition, new GameMetaData
+                {
+                    SupportedModManager = ModManager.MO2,
+                    Game = Game.EnderalSpecialEdition,
+                    NexusName = "enderalspecialedition",
+                    NexusGameId = 3685,
+                    MO2Name = "Enderal Special Edition",
+                    MO2ArchiveName = "enderalse",
+                    SteamIDs = new List<int>{976620},
+                    RequiredFiles = new List<string>
+                    {
+                        "SkyrimSE.exe"
+                    },
+                    MainExecutable = "SkyrimSE.exe",
+                    CommonlyConfusedWith = new []{Game.Enderal}
                 }
             },
             {
@@ -430,45 +488,179 @@ namespace Wabbajack.Common
                     NexusGameId = 804,
                     SteamIDs = new List<int> {262060},
                     GOGIDs = new List<int>{1450711444},
+                    EpicGameStoreIDs = new List<string> {"b4eecf70e3fe4e928b78df7855a3fc2d"},
                     IsGenericMO2Plugin = true,
                     RequiredFiles = new List<string>
                     {
-                        "_windows\\Darkest.exe"
+                        "_windowsnosteam\\Darkest.exe"
                     },
-                    MainExecutable = "_windows\\Darkest.exe"
+                    MainExecutable = "_windowsnosteam\\Darkest.exe"
                 }
             },
-            {	
-                Game.Witcher3, new GameMetaData	
-                {	
-                    Game = Game.Witcher3,	
-                    NexusName = "witcher3",	
+            {
+                Game.Dishonored, new GameMetaData
+                {
+                    Game = Game.Dishonored,
+                    NexusName = "dishonored",
+                    MO2Name = "Dishonored",
+                    NexusGameId = 802,
+                    SteamIDs = new List<int> {205100},
+                    GOGIDs = new List<int>{1701063787},
+                    RequiredFiles = new List<string>
+                    {
+                        "Binaries\\Win32\\Dishonored.exe"
+                    },
+                    MainExecutable = @"Binaries\Win32\Dishonored.exe"
+                }
+            },
+            {
+                Game.Witcher3, new GameMetaData
+                {
+                    Game = Game.Witcher3,
+                    NexusName = "witcher3",
                     NexusGameId = 952,
                     MO2Name = "The Witcher 3: Wild Hunt",
-                    SteamIDs = new List<int>{292030, 499450}, // normal and GotY	
-                    GOGIDs = new List<int>{1207664643, 1495134320, 1207664663, 1640424747}, // normal, GotY and both in packages	
-                    RequiredFiles = new List<string>	
-                    {	
-                        "bin\\x64\\witcher3.exe"	
+                    SteamIDs = new List<int>{292030, 499450}, // normal and GotY
+                    GOGIDs = new List<int>{1207664643, 1495134320, 1207664663, 1640424747}, // normal, GotY and both in packages
+                    RequiredFiles = new List<string>
+                    {
+                        "bin\\x64\\witcher3.exe"
                     },
                     MainExecutable = @"bin\x64\witcher3.exe"
                 }
             },
-            {	
-                Game.StardewValley, new GameMetaData	
-                {	
-                    Game = Game.StardewValley,	
+            {
+                Game.StardewValley, new GameMetaData
+                {
+                    Game = Game.StardewValley,
                     NexusName = "stardewvalley",
                     MO2Name = "Stardew Valley",
                     NexusGameId = 1303,
-                    SteamIDs = new List<int>{413150},	
+                    SteamIDs = new List<int>{413150},
                     GOGIDs = new List<int>{1453375253},
                     IsGenericMO2Plugin = true,
-                    RequiredFiles = new List<string>	
-                    {	
-                        "Stardew Valley.exe"	
+                    RequiredFiles = new List<string>
+                    {
+                        "Stardew Valley.exe"
                     },
                     MainExecutable = "Stardew Valley.exe"
+                }
+            },
+            {
+                Game.KingdomComeDeliverance, new GameMetaData
+                {
+                    Game = Game.KingdomComeDeliverance,
+                    NexusName = "kingdomcomedeliverance",
+                    MO2Name = "Kingdom Come: Deliverance",
+                    MO2ArchiveName = "kingdomcomedeliverance",
+                    NexusGameId = 2298,
+                    SteamIDs = new List<int>{379430},
+                    GOGIDs = new List<int>{1719198803},
+                    IsGenericMO2Plugin = true,
+                    RequiredFiles = new List<string>
+                    {
+                        @"bin\Win64\KingdomCome.exe"
+                    },
+                    MainExecutable = @"bin\Win64\KingdomCome.exe"
+                }
+            },
+            {
+                Game.MechWarrior5Mercenaries, new GameMetaData
+                {
+                    Game = Game.MechWarrior5Mercenaries,
+                    NexusName = "mechwarrior5mercenaries",
+                    MO2Name = "Mechwarrior 5: Mercenaries",
+                    MO2ArchiveName = "mechwarrior5mercenaries",
+                    NexusGameId = 3099,
+                    EpicGameStoreIDs = new List<string> {"9fd39d8ac72946a2a10a887ce86e6c35"},
+                    IsGenericMO2Plugin = true,
+                    RequiredFiles = new List<string>
+                    {
+                        @"MW5Mercs\Binaries\Win64\MechWarrior-Win64-Shipping.exe"
+                    },
+                    MainExecutable = @"MW5Mercs\Binaries\Win64\MechWarrior-Win64-Shipping.exe"
+                }
+            },
+            {
+                Game.NoMansSky, new GameMetaData
+                {
+                    Game = Game.NoMansSky,
+                    NexusName = "nomanssky",
+                    NexusGameId = 1634,
+                    MO2Name = "No Man's Sky",
+                    SteamIDs = new List<int>{275850},
+                    GOGIDs = new List<int>{1446213994},
+                    RequiredFiles = new List<string>
+                    {
+                        @"Binaries\NMS.exe"
+                    },
+                    MainExecutable = @"Binaries\NMS.exe"
+                }
+            },
+            {
+                Game.DragonAgeOrigins, new GameMetaData
+                {
+                    Game = Game.DragonAgeOrigins,
+                    NexusName = "dragonage",
+                    NexusGameId = 140,
+                    MO2Name = "Dragon Age: Origins",
+                    SteamIDs = new List<int>{47810},
+                    OriginIDs = new List<string>{"DR:169789300", "DR:208591800"},
+                    GOGIDs = new List<int>{1949616134},
+                    RequiredFiles = new List<string>
+                    {
+                        @"bin_ship\daorigins.exe"
+                    },
+                    MainExecutable = @"bin_ship\daorigins.exe"
+                }
+            },
+            {
+                Game.DragonAge2, new GameMetaData
+                {
+                    Game = Game.DragonAge2,
+                    NexusName = "dragonage2",
+                    NexusGameId = 141,
+                    MO2Name = "Dragon Age 2", // Probably wrong
+                    SteamIDs = new List<int>{1238040},
+                    OriginIDs = new List<string>{"OFB-EAST:59474"},
+                    RequiredFiles = new List<string>
+                    {
+                        @"bin_ship\DragonAge2.exe"
+                    },
+                    MainExecutable = @"bin_ship\DragonAge2.exe"
+                }
+            },
+            {
+                Game.DragonAgeInquisition, new GameMetaData
+                {
+                    Game = Game.DragonAgeInquisition,
+                    NexusName = "dragonageinquisition",
+                    NexusGameId = 728,
+                    MO2Name = "Dragon Age: Inquisition", // Probably wrong
+                    SteamIDs = new List<int>{1222690},
+                    OriginIDs = new List<string>{"OFB-EAST:51937"},
+                    RequiredFiles = new List<string>
+                    {
+                        @"DragonAgeInquisition.exe"
+                    },
+                    MainExecutable = @"DragonAgeInquisition.exe"
+                }
+            },
+            {
+                Game.KerbalSpaceProgram, new GameMetaData
+                {
+                    Game = Game.KerbalSpaceProgram,
+                    NexusName = "kerbalspaceprogram",
+                    MO2Name = "Kerbal Space Program",
+                    NexusGameId = 272,
+                    SteamIDs = new List<int>{220200},
+                    GOGIDs = new List<int>{1429864849},
+                    IsGenericMO2Plugin = true,
+                    RequiredFiles = new List<string>
+                    {
+                        @"KSP_x64.exe"
+                    },
+                    MainExecutable = @"KSP_x64.exe"
                 }
             }
         };
@@ -481,3 +673,4 @@ namespace Wabbajack.Common
 
     }
 }
+

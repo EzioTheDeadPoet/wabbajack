@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
@@ -13,6 +14,7 @@ using Wabbajack.Common;
 using Wabbajack.Common.Serialization.Json;
 using Wabbajack.Server.DataLayer;
 using Wabbajack.Server.DTOs;
+using Wabbajack.Server.Services;
 
 
 namespace Wabbajack.BuildServer
@@ -31,37 +33,49 @@ namespace Wabbajack.BuildServer
         private readonly SqlService _sql;
         private const string ApiKeyHeaderName = "X-Api-Key";
 
+        private MetricsKeyCache _keyCache;
+
         public ApiKeyAuthenticationHandler(
             IOptionsMonitor<ApiKeyAuthenticationOptions> options,
             ILoggerFactory logger,
             UrlEncoder encoder,
             ISystemClock clock,
+            MetricsKeyCache keyCache,
             SqlService db) : base(options, logger, encoder, clock)
         {
             _sql = db;
+            _keyCache = keyCache;
         }
 
         protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
         {
             var metricsKey = Request.Headers[Consts.MetricsKeyHeader].FirstOrDefault();
-            await LogRequest(metricsKey);
+            // Never needed this, disabled for now
+            //await LogRequest(metricsKey);
             if (metricsKey != default)
             {
+                await _keyCache.AddKey(metricsKey);
                 if (await _sql.IsTarKey(metricsKey))
                 {
-                    await _sql.IngestMetric(new Metric {Action = "TarKey", Subject = "Auth", MetricsKey = metricsKey, Timestamp = DateTime.UtcNow});
+                    await _sql.IngestMetric(new Metric
+                    {
+                        Action = "TarKey",
+                        Subject = "Auth",
+                        MetricsKey = metricsKey,
+                        Timestamp = DateTime.UtcNow
+                    });
                     await Task.Delay(TimeSpan.FromSeconds(60));
                     throw new Exception("Error, lipsum timeout of the cross distant cloud.");
                 }
             }
 
             var authorKey = Request.Headers[ApiKeyHeaderName].FirstOrDefault();
-            
+
             if (authorKey == null && metricsKey == null)
             {
                 return AuthenticateResult.NoResult();
             }
-            
+
 
             if (authorKey != null)
             {
@@ -81,16 +95,16 @@ namespace Wabbajack.BuildServer
 
                 return AuthenticateResult.Success(ticket);
             }
+            
 
-            if (!await _sql.ValidMetricsKey(metricsKey))
+            if (!await _keyCache.IsValidKey(metricsKey))
             {
                 return AuthenticateResult.Fail("Invalid Metrics Key");
             }
             else
             {
-                var claims = new List<Claim>();
+                var claims = new List<Claim> {new(ClaimTypes.Role, "User")};
 
-                claims.Add(new Claim(ClaimTypes.Role, "User"));
 
                 var identity = new ClaimsIdentity(claims, Options.AuthenticationType);
                 var identities = new List<ClaimsIdentity> {identity};
@@ -99,7 +113,6 @@ namespace Wabbajack.BuildServer
 
                 return AuthenticateResult.Success(ticket);
             }
-
         }
 
         [JsonName("RequestLog")]

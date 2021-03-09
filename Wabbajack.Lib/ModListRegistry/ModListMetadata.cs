@@ -35,13 +35,22 @@ namespace Wabbajack.Lib.ModListRegistry
         [JsonProperty("nsfw")]
         public bool NSFW { get; set; }
 
+        [JsonProperty("utility_list")]
+        public bool UtilityList { get; set; }
+
+        [JsonProperty("image_contains_title")]
+        public bool ImageContainsTitle { get; set; }
+
+        [JsonProperty("force_down")]
+        public bool ForceDown { get; set; }
+
         [JsonProperty("links")]
         public LinksObject Links { get; set; } = new LinksObject();
 
         [JsonProperty("download_metadata")]
         public DownloadMetadata? DownloadMetadata { get; set; }
 
-        [JsonIgnore] 
+        [JsonIgnore]
         public ModListSummary ValidationSummary { get; set; } = new ModListSummary();
 
         [JsonName("Links")]
@@ -65,9 +74,11 @@ namespace Wabbajack.Lib.ModListRegistry
             var client = new Http.Client();
             Utils.Log("Loading ModLists from GitHub");
             var metadataResult = client.GetStringAsync(Consts.ModlistMetadataURL);
+            var utilityResult = client.GetStringAsync(Consts.UtilityModlistMetadataURL);
             var summaryResult = client.GetStringAsync(Consts.ModlistSummaryURL);
 
             var metadata = (await metadataResult).FromJsonString<List<ModlistMetadata>>();
+            metadata = metadata.Concat((await utilityResult).FromJsonString<List<ModlistMetadata>>()).ToList();
             try
             {
                 var summaries = (await summaryResult).FromJsonString<List<ModListSummary>>().ToDictionary(d => d.MachineURL);
@@ -81,7 +92,13 @@ namespace Wabbajack.Lib.ModListRegistry
                 // ignored
             }
 
-            return metadata.OrderBy(m => (m.ValidationSummary?.HasFailures ?? false ? 1 : 0, m.Title)).ToList();
+            var random = new Random();
+            return metadata
+                // Sort randomly initially, just to give each list a fair shake
+                .Shuffle(random)
+                // Put broken lists at bottom
+                .OrderBy(m => (m.ValidationSummary?.HasFailures ?? false ? 1 : 0))
+                .ToList();
         }
 
         public static async Task<List<ModlistMetadata>> LoadUnlistedFromGithub()
@@ -91,14 +108,14 @@ namespace Wabbajack.Lib.ModListRegistry
                 var client = new Http.Client();
                 return (await client.GetStringAsync(Consts.UnlistedModlistMetadataURL)).FromJsonString<List<ModlistMetadata>>();
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 Utils.LogStatus("Error loading unlisted modlists");
                 return new List<ModlistMetadata>();
             }
 
         }
-        
+
         public async ValueTask<bool> NeedsDownload(AbsolutePath modlistPath)
         {
             if (!modlistPath.Exists) return true;
@@ -106,7 +123,7 @@ namespace Wabbajack.Lib.ModListRegistry
             {
                 return true;
             }
-            return DownloadMetadata.Hash != await modlistPath.FileHashCachedAsync(true);
+            return DownloadMetadata.Hash != await modlistPath.FileHashCachedAsync();
         }
     }
 
@@ -139,7 +156,7 @@ namespace Wabbajack.Lib.ModListRegistry
         public int Passed { get; set; }
         [JsonProperty("updating")]
         public int Updating { get; set; }
-        
+
         [JsonProperty("mirrored")]
         public int Mirrored { get; set; }
 

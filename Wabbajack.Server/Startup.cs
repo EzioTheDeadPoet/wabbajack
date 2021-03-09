@@ -5,14 +5,15 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
-using Microsoft.OpenApi.Models;
 using Newtonsoft.Json;
 using Wabbajack.BuildServer;
+using Wabbajack.Lib.LibCefHelpers;
 using Wabbajack.Server.DataLayer;
 using Wabbajack.Server.Services;
 
@@ -36,6 +37,7 @@ namespace Wabbajack.Server
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
+            Helpers.Init();
             /*services.AddSwaggerGen(c =>
             {
                 c.SwaggerDoc("v1", new OpenApiInfo {Title = "Wabbajack Build API", Version = "v1"});
@@ -70,6 +72,17 @@ namespace Wabbajack.Server
             services.AddSingleton<CDNMirrorList>();
             services.AddSingleton<NexusPermissionsUpdater>();
             services.AddSingleton<MirrorUploader>();
+            services.AddSingleton<MirrorQueueService>();
+            services.AddSingleton<Watchdog>();
+            services.AddSingleton<DiscordFrontend>();
+            services.AddSingleton<AuthoredFilesCleanup>();
+            services.AddSingleton<MetricsKeyCache>();
+            services.AddResponseCompression(options =>
+            {
+                options.Providers.Add<BrotliCompressionProvider>();
+                options.Providers.Add<GzipCompressionProvider>();
+                options.MimeTypes = new[] {"application/json"};
+            });
             
             services.AddMvc();
             services.AddControllers()
@@ -117,6 +130,7 @@ namespace Wabbajack.Server
             app.UseNexusPoll();
             app.UseArchiveMaintainer();
             app.UseModListDownloader();
+            app.UseResponseCompression();
             
             app.UseService<NonNexusDownloadValidator>();
             app.UseService<ListValidator>();
@@ -127,6 +141,11 @@ namespace Wabbajack.Server
             app.UseService<CDNMirrorList>();
             app.UseService<NexusPermissionsUpdater>();
             app.UseService<MirrorUploader>();
+            app.UseService<MirrorQueueService>();
+            app.UseService<Watchdog>();
+            app.UseService<DiscordFrontend>();
+            //app.UseService<AuthoredFilesCleanup>();
+            app.UseService<MetricsKeyCache>();
 
             app.Use(next =>
             {

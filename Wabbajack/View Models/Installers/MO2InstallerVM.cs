@@ -76,21 +76,33 @@ namespace Wabbajack
                     })
                 .ToProperty(this, nameof(CanInstall));
 
-            // Have Installation location updates modify the downloads location if empty
+            // Have Installation location updates modify the downloads location if empty or the same path
             this.WhenAny(x => x.Location.TargetPath)
                 .Skip(1) // Don't do it initially
                 .Subscribe(installPath =>
                 {
-                    if (DownloadLocation.TargetPath == default)
+                    if (DownloadLocation.TargetPath == default || DownloadLocation.TargetPath == installPath)
                     {
                         DownloadLocation.TargetPath = installPath.Combine("downloads");
                     }
                 })
                 .DisposeWith(CompositeDisposable);
 
+            // Have Download location updates change if the same as the install path
+            this.WhenAny(x => x.DownloadLocation.TargetPath)
+                .Skip(1) // Don't do it initially
+                .Subscribe(downloadPath =>
+                {
+                    if (downloadPath != default && downloadPath == Location.TargetPath)
+                    {
+                        DownloadLocation.TargetPath = Location.TargetPath.Combine("downloads");
+                    }
+                })
+            .DisposeWith(CompositeDisposable);
+
             // Load settings
             _CurrentSettings = installerVM.WhenAny(x => x.ModListLocation.TargetPath)
-                .Select(path => path == null ? null : installerVM.MWVM.Settings.Installer.Mo2ModlistSettings.TryCreate(path))
+                .Select(path => path == default ? null : installerVM.MWVM.Settings.Installer.Mo2ModlistSettings.TryCreate(path))
                 .ToGuiProperty(this, nameof(CurrentSettings));
             this.WhenAny(x => x.CurrentSettings)
                 .Pairwise()
@@ -157,7 +169,7 @@ namespace Wabbajack
                 parameters: SystemParametersConstructor.Create()))
             {
                 installer.UseCompression = Parent.MWVM.Settings.Filters.UseCompression;
-                Parent.MWVM.Settings.Performance.AttachToBatchProcessor(installer);
+                Parent.MWVM.Settings.Performance.SetProcessorSettings(installer);
 
                 return await Task.Run(async () =>
                 {

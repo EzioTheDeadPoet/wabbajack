@@ -1,14 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Data.HashFunction.xxHash;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
-using RocksDbSharp;
 using File = Alphaleonis.Win32.Filesystem.File;
 using Path = Alphaleonis.Win32.Filesystem.Path;
+using System.Data.SQLite;
 
 namespace Wabbajack.Common
 {
@@ -117,20 +118,83 @@ namespace Wabbajack.Common
 
     public static class HashCache
     {
-        private const uint HashCacheVersion = 0x01;
+        private static AbsolutePath DBLocation = Consts.LocalAppDataPath.Combine("GlobalHashCache.sqlite");
+        private static string _connectionString;
+        private static SQLiteConnection _conn;
+
 
         // Keep rock DB out of Utils, as it causes lock problems for users of Wabbajack.Common that aren't interested in it, otherwise
-        private static RocksDb _hashCache;
 
         static HashCache()
         {
-            var options = new DbOptions().SetCreateIfMissing(true);
-            _hashCache = RocksDb.Open(options, (string)Consts.LocalAppDataPath.Combine("GlobalHashCache.rocksDb"));
+            _connectionString = String.Intern($"URI=file:{DBLocation};Pooling=True;Max Pool Size=100; Journal Mode=Memory;");
+            _conn = new SQLiteConnection(_connectionString);
+            _conn.Open();
+
+            using var cmd = new SQLiteCommand(_conn);
+            cmd.CommandText = @"CREATE TABLE IF NOT EXISTS HashCache (
+            Path TEXT PRIMARY KEY,
+            LastModified BIGINT,
+            Hash BIGINT)
+            WITHOUT ROWID";
+            cmd.ExecuteNonQuery();
+
+
+
+
+        }
+
+        private static (AbsolutePath Path, long LastModified, Hash Hash) GetFromCache(AbsolutePath path)
+        {
+            using var cmd = new SQLiteCommand(_conn);
+            cmd.CommandText = "SELECT LastModified, Hash FROM HashCache WHERE Path = @path";
+            cmd.Parameters.AddWithValue("@path", path.ToString());
+            cmd.PrepareAsync();
+            
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                return (path, reader.GetInt64(0), Hash.FromLong(reader.GetInt64(1)));
+            }
+
+            return default;
+        }
+        
+        private static void PurgeCacheEntry(AbsolutePath path)
+        {
+            using var cmd = new SQLiteCommand(_conn);
+            cmd.CommandText = "DELETE FROM HashCache WHERE Path = @path";
+            cmd.Parameters.AddWithValue("@path", path.ToString());
+            cmd.PrepareAsync();
+            
+            cmd.ExecuteNonQuery();
+        }
+
+        private static void UpsertCacheEntry(AbsolutePath path, long lastModified, Hash hash)
+        {
+            using var cmd = new SQLiteCommand(_conn);
+            cmd.CommandText = @"INSERT INTO HashCache (Path, LastModified, Hash) VALUES (@path, @lastModified, @hash)
+            ON CONFLICT(Path) DO UPDATE SET LastModified = @lastModified, Hash = @hash";
+            cmd.Parameters.AddWithValue("@path", path.ToString());
+            cmd.Parameters.AddWithValue("@lastModified", lastModified);
+            cmd.Parameters.AddWithValue("@hash", (long)hash);
+            cmd.PrepareAsync();
+            
+            cmd.ExecuteNonQuery();
+        }
+
+        public static void VacuumDatabase()
+        {
+            using var cmd = new SQLiteCommand(_conn);
+            cmd.CommandText = @"VACUUM";
+            cmd.PrepareAsync();
+
+            cmd.ExecuteNonQuery();
         }
 
         public static Hash ReadHash(this BinaryReader br)
         {
-            return new Hash(br.ReadUInt64());
+            return new(br.ReadUInt64());
         }
 
         public static void Write(this BinaryWriter bw, Hash hash)
@@ -146,7 +210,7 @@ namespace Wabbajack.Common
                 using var i = new MemoryStream(Encoding.UTF8.GetBytes(s));
                 i.CopyTo(o);
             }
-            return sha.Hash.ToHex();
+            return sha.Hash!.ToHex();
         }
 
         public static Hash xxHash(this byte[] data)
@@ -182,33 +246,27 @@ namespace Wabbajack.Common
 
         public static bool TryGetHashCache(this AbsolutePath file, out Hash hash)
         {
-            var normPath = Encoding.UTF8.GetBytes(file.Normalize());
-            var value = _hashCache.Get(normPath);
             hash = default;
+            if (!file.Exists) return false;
 
-            if (value == null) return false;
-            if (value.Length != 20) return false;
+            var result = GetFromCache(file);
+            if (result == default)
+                return false;
 
-            using var ms = new MemoryStream(value);
-            using var br = new BinaryReader(ms);
-            var version = br.ReadUInt32();
-            if (version != HashCacheVersion) return false;
+            if (result.LastModified == file.LastModifiedUtc.ToFileTimeUtc())
+            {
+                hash = result.Hash;
+                return true;
+            }
 
-            var lastModified = br.ReadUInt64();
-            if (lastModified != file.LastModifiedUtc.AsUnixTime()) return false;
-            hash = new Hash(br.ReadUInt64());
-            return true;
+            PurgeCacheEntry(file);
+            return false;
         }
 
         private static void WriteHashCache(this AbsolutePath file, Hash hash)
         {
-            using var ms = new MemoryStream(20);
-            using var bw = new BinaryWriter(ms);
-            bw.Write(HashCacheVersion);
-            var lastModified = file.LastModifiedUtc.AsUnixTime();
-            bw.Write(lastModified);
-            bw.Write((ulong)hash);
-            _hashCache.Put(Encoding.UTF8.GetBytes(file.Normalize()), ms.ToArray());
+            if (!file.Exists) return;
+            UpsertCacheEntry(file, file.LastModifiedUtc.ToFileTimeUtc(), hash);
         }
 
         public static void FileHashWriteCache(this AbsolutePath file, Hash hash)
@@ -216,17 +274,17 @@ namespace Wabbajack.Common
             WriteHashCache(file, hash);
         }
 
-        public static async Task<Hash> FileHashCachedAsync(this AbsolutePath file, bool nullOnIOError = false)
+        public static async Task<Hash?> FileHashCachedAsync(this AbsolutePath file)
         {
             if (TryGetHashCache(file, out var foundHash)) return foundHash;
 
-            var hash = await file.FileHashAsync(nullOnIOError);
-            if (hash != Hash.Empty)
-                WriteHashCache(file, hash);
+            var hash = await file.FileHashAsync();
+            if (hash != null && hash != Hash.Empty)
+                WriteHashCache(file, hash.Value);
             return hash;
         }
 
-        public static async Task<Hash> FileHashAsync(this AbsolutePath file, bool nullOnIOError = false)
+        public static async Task<Hash?> FileHashAsync(this AbsolutePath file)
         {
             try
             {
@@ -236,10 +294,10 @@ namespace Wabbajack.Common
                 var value = await xxHashFactory.Instance.Create(config).ComputeHashAsync(hs);
                 return new Hash(BitConverter.ToUInt64(value.Hash));
             }
-            catch (IOException)
+            catch (IOException e)
             {
-                if (nullOnIOError) return Hash.Empty;
-                throw;
+                Utils.Error(e, $"Unable to hash file {file}");
+                return null;
             }
         }
     }

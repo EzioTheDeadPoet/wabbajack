@@ -15,6 +15,11 @@ namespace Wabbajack.Lib
     {
         public WorkQueue Queue { get; } = new WorkQueue();
 
+        public int DownloadThreads { get; set; } = Environment.ProcessorCount <= 8 ? Environment.ProcessorCount : 8;
+        public int DiskThreads { get; set; } = Environment.ProcessorCount;
+        public bool ReduceHDDThreads { get; set; } = true;
+        public bool FavorPerfOverRam { get; set; } = false;
+        
         public Context VFS { get; }
 
         protected StatusUpdateTracker UpdateTracker { get; }
@@ -51,6 +56,7 @@ namespace Wabbajack.Lib
         public BehaviorSubject<bool> ManualCoreLimit = new BehaviorSubject<bool>(true);
         public BehaviorSubject<byte> MaxCores = new BehaviorSubject<byte>(byte.MaxValue);
         public BehaviorSubject<Percent> TargetUsagePercent = new BehaviorSubject<Percent>(Percent.One);
+        public Subject<int> DesiredThreads { get; set; }
 
         public ABatchProcessor(int steps)
         {
@@ -62,8 +68,11 @@ namespace Wabbajack.Lib
                 .DisposeWith(_subs);
             UpdateTracker.Progress.Subscribe(_percentCompleted);
             UpdateTracker.StepName.Subscribe(_textStatus);
+            DesiredThreads = new Subject<int>();
+            Queue.SetActiveThreadsObservable(DesiredThreads);
         }
 
+        
         /// <summary>
         /// Gets the recommended maximum number of threads that should be used for the current machine.
         /// This will either run a heavy processing job to do the measurement in the current folder, or refer to caches.
@@ -160,15 +169,24 @@ namespace Wabbajack.Lib
 
             Utils.Log("Starting Installer Task");
             return Task.Run(async () =>
-            { 
+            {
                 try
                 {
                     Utils.Log("Installation has Started");
                     _isRunning.OnNext(true);
                     return await _Begin(_cancel.Token);
                 }
+                catch (Exception ex)
+                {
+                    var _ = Metrics.Error(this.GetType(), ex);
+                    throw;
+                }
                 finally
                 {
+                    Utils.Log("Vacuuming databases");
+                    HashCache.VacuumDatabase();
+                    VirtualFile.VacuumDatabase();
+                    Utils.Log("Vacuuming completed");
                     _isRunning.OnNext(false);
                 }
             });

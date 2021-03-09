@@ -24,10 +24,8 @@ namespace Wabbajack.Lib.Downloaders
             new LoversLabDownloader(),
             new VectorPlexusDownloader(),
             new DeadlyStreamDownloader(),
-            new BethesdaNetDownloader(),
             new TESAllianceDownloader(),
             new TESAllDownloader(),
-            new YouTubeDownloader(),
             new WabbajackCDNDownloader(),
             new YandexDownloader(),
             new HTTPDownloader(),
@@ -36,8 +34,6 @@ namespace Wabbajack.Lib.Downloaders
 
         public static readonly List<IUrlInferencer> Inferencers = new List<IUrlInferencer>()
         {
-            new BethesdaNetInferencer(),
-            new YoutubeInferencer(),
             new WabbajackCDNInfluencer()
         };
 
@@ -56,8 +52,13 @@ namespace Wabbajack.Lib.Downloaders
                 if (state != null)
                     return state;
             }
-            return null;
-
+            
+            var meta = string.Join("\n", new string[]
+            {
+                "[General]",
+                $"directURL={uri}"    
+            });
+            return (AbstractDownloadState)(await ResolveArchive(meta.LoadIniString()));
         }
 
         public static T GetInstance<T>() where T : IDownloader
@@ -66,10 +67,10 @@ namespace Wabbajack.Lib.Downloaders
             return inst;
         }
 
-        public static async Task<AbstractDownloadState> ResolveArchive(dynamic ini, bool quickMode = false)
+        public static async Task<AbstractDownloadState?> ResolveArchive(dynamic ini, bool quickMode = false)
         {
             var states = await Task.WhenAll(Downloaders.Select(d =>
-                    (Task<AbstractDownloadState>)d.GetDownloaderState(ini, quickMode)));
+                    (Task<AbstractDownloadState?>)d.GetDownloaderState(ini, quickMode)));
             return states.FirstOrDefault(result => result != null);
         }
 
@@ -103,8 +104,9 @@ namespace Wabbajack.Lib.Downloaders
         {
             if (await Download(archive, destination))
             {
-                await destination.FileHashCachedAsync();
-                return DownloadResult.Success;
+                var downloadedHash = await destination.FileHashCachedAsync();
+                if (downloadedHash == archive.Hash || archive.Hash == default) 
+                    return DownloadResult.Success;
             }
 
             
@@ -125,10 +127,13 @@ namespace Wabbajack.Lib.Downloaders
             var result = await FindUpgrade(archive);
             if (result == default)
             {
-                Utils.Log(
-                    $"No solution for broken download {archive.Name} {archive.State.PrimaryKeyString} could be found");
-                return DownloadResult.Failure;
-
+                result = await AbstractDownloadState.ServerFindUpgrade(archive);
+                if (result == default)
+                {
+                    Utils.Log(
+                        $"No solution for broken download {archive.Name} {archive.State.PrimaryKeyString} could be found");
+                    return DownloadResult.Failure;
+                }
             }
 
             Utils.Log($"Looking for patch for {archive.Name} ({(long)archive.Hash} {archive.Hash.ToHex()} -> {(long)result.Archive!.Hash} {result.Archive!.Hash.ToHex()})");
@@ -188,7 +193,7 @@ namespace Wabbajack.Lib.Downloaders
                     };
                 return await Download(newArchive, destination);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 return false;
             }

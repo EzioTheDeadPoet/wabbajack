@@ -7,6 +7,7 @@ using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
+using Org.BouncyCastle.Crypto.Parameters;
 using ReactiveUI;
 using Wabbajack.Common;
 using Wabbajack.Common.StatusFeed;
@@ -17,6 +18,8 @@ namespace Wabbajack.Lib.Downloaders
 {
     public abstract class AbstractNeedsLoginDownloader : INeedsLogin
     {
+        public bool IsCloudFlareProtected = false;
+        
         private readonly Uri _loginUri;
         private readonly string _encryptedKeyName;
         private readonly string _cookieDomain;
@@ -86,19 +89,26 @@ namespace Wabbajack.Lib.Downloaders
             return cookies;
         }
         
-        public async Task<Wabbajack.Lib.Http.Client> GetAuthedClient()
+        public async Task<Http.Client> GetAuthedClient()
         {
             Helpers.Cookie[] cookies;
-            try
+            if (Consts.IsServer || IsCloudFlareProtected)
             {
-                cookies = await Utils.FromEncryptedJson<Helpers.Cookie[]>(_encryptedKeyName);
-                if (cookies != null)
-                    return Helpers.GetClient(cookies, SiteURL.ToString());
-            }
-            catch (FileNotFoundException) { }
+                try
+                {
+                    cookies = await Utils.FromEncryptedJson<Helpers.Cookie[]>(_encryptedKeyName);
+                    if (cookies != null)
+                        return Helpers.GetClient(cookies, SiteURL.ToString());
+                }
+                catch (FileNotFoundException) { }
 
-            cookies = await Utils.Log(new RequestSiteLogin(this)).Task;
-            return Helpers.GetClient(cookies, SiteURL.ToString());
+                cookies = await Utils.Log(new RequestSiteLogin(this)).Task;
+                return Helpers.GetClient(cookies, SiteURL.ToString());
+            }
+
+            cookies = await ClientAPI.GetAuthInfo<Helpers.Cookie[]>(_encryptedKeyName);
+            var client = Helpers.GetClient(cookies, SiteURL.ToString());
+            return client;
         }
         
         public async Task Prepare()
@@ -106,6 +116,12 @@ namespace Wabbajack.Lib.Downloaders
             if (_isPrepared) return;
             AuthedClient = (await GetAuthedClient()) ?? throw new NotLoggedInError(this);
             _isPrepared = true;
+        }
+
+        public async Task<Driver> GetAuthedDriver()
+        {
+            var driver = await Driver.Create();
+            return driver;
         }
 
         public class NotLoggedInError : Exception
@@ -118,7 +134,7 @@ namespace Wabbajack.Lib.Downloaders
             }
         }
 
-        
+
         public class RequestSiteLogin : AUserIntervention
         {
             public AbstractNeedsLoginDownloader Downloader { get; }

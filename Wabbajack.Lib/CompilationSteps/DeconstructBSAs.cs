@@ -25,10 +25,10 @@ namespace Wabbajack.Lib.CompilationSteps
                 {
                     var general = kv.Value.General;
                     if (general.notes != null && (general.notes.Contains(Consts.WABBAJACK_INCLUDE) || general.notes.Contains(Consts.WABBAJACK_NOMATCH_INCLUDE))) return true;
-                    if (general.comments != null && (general.notes.Contains(Consts.WABBAJACK_INCLUDE) || general.notes.Contains(Consts.WABBAJACK_NOMATCH_INCLUDE))) return true;
+                    if (general.comments != null && (general.comments.Contains(Consts.WABBAJACK_INCLUDE) || general.comments.Contains(Consts.WABBAJACK_NOMATCH_INCLUDE))) return true;
                     return false;
                 })
-                .Select(kv => kv.Key.RelativeTo(_mo2Compiler.MO2Folder))
+                .Select(kv => kv.Key.RelativeTo(_mo2Compiler.SourcePath))
                 .ToList();
 
             _microstack = bsa => new List<ICompilationStep>
@@ -51,7 +51,7 @@ namespace Wabbajack.Lib.CompilationSteps
             if (!Consts.SupportedBSAs.Contains(source.Path.Extension)) return null;
 
             var defaultInclude = false;
-            if (source.Path.RelativeTo(_mo2Compiler.MO2Folder).InFolder(_mo2Compiler.MO2Folder.Combine(Consts.MO2ModFolderName)))
+            if (source.Path.RelativeTo(_mo2Compiler.SourcePath).InFolder(_mo2Compiler.SourcePath.Combine(Consts.MO2ModFolderName)))
                 if (_includeDirectly.Any(path => source.Path.StartsWith(path)))
                     defaultInclude = true;
 
@@ -76,7 +76,7 @@ namespace Wabbajack.Lib.CompilationSteps
             Func<Task>? _cleanup = null;
             if (defaultInclude)
             {
-                _cleanup = await source.File.Context.Stage(source.File.Children);
+                //_cleanup = await source.File.Context.Stage(source.File.Children);
             }
 
             var matches = await sourceFiles.PMap(_mo2Compiler.Queue, e => _mo2Compiler.RunStack(stack, new RawSourceFile(e, Consts.BSACreationDir.Combine((RelativePath)id, (RelativePath)e.Name))));

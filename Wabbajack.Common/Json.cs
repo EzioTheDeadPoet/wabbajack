@@ -36,6 +36,15 @@ namespace Wabbajack.Common
                 Converters = Converters,
                 DateTimeZoneHandling = DateTimeZoneHandling.Utc
             };
+        
+        public static JsonSerializerSettings JsonSettingsPretty  =>
+            new JsonSerializerSettings {
+                TypeNameHandling = TypeNameHandling.Objects,
+                SerializationBinder = new JsonNameSerializationBinder(),
+                Converters = Converters,
+                DateTimeZoneHandling = DateTimeZoneHandling.Utc,
+                Formatting = Formatting.Indented
+            };
 
         public static JsonSerializerSettings GenericJsonSettings =>
             new JsonSerializerSettings
@@ -51,18 +60,27 @@ namespace Wabbajack.Common
             File.WriteAllText(filename, JsonConvert.SerializeObject(obj, Formatting.Indented, JsonSettings));
         }
         
-        public static void ToJson<T>(this T obj, Stream stream)
+        public static void ToJson<T>(this T obj, Stream stream, bool useGenericSettings = false, bool prettyPrint = false)
         {
             using var tw = new StreamWriter(stream, Encoding.UTF8, bufferSize: 1024, leaveOpen: true);
             using var writer = new JsonTextWriter(tw);
-            var ser = JsonSerializer.Create(JsonSettings);
+
+            JsonSerializerSettings settings = (useGenericSettings, prettyPrint) switch
+            {
+                (true, true) => GenericJsonSettings,
+                (false, true) => JsonSettingsPretty,
+                (false, false) => JsonSettings,
+                (true, false) => GenericJsonSettings
+            };
+
+            var ser = JsonSerializer.Create(settings);
             ser.Serialize(writer, obj);
         }
         
-        public static async ValueTask ToJsonAsync<T>(this T obj, AbsolutePath path)
+        public static async ValueTask ToJsonAsync<T>(this T obj, AbsolutePath path, bool useGenericSettings = false, bool prettyPrint = false)
         {
             await using var fs = await path.Create();
-            obj.ToJson(fs);
+            obj.ToJson(fs, useGenericSettings, prettyPrint: prettyPrint);
         }
 
         public static string ToJson<T>(this T obj, bool useGenericSettings = false)
@@ -247,7 +265,7 @@ namespace Wabbajack.Common
         {
             public override void WriteJson(JsonWriter writer, [AllowNull] IPath value, JsonSerializer serializer)
             {
-                writer.WriteValue(Enum.GetName(typeof(Game), value));
+                writer.WriteValue(value == null ? "" : value.ToString());
             }
 
             public override IPath ReadJson(JsonReader reader, Type objectType, [AllowNull] IPath existingValue, bool hasExistingValue, JsonSerializer serializer)

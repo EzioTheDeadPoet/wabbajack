@@ -27,14 +27,16 @@ namespace Wabbajack.BuildServer.Controllers
         private ILogger<AuthoredFiles> _logger;
         private AppSettings _settings;
         private CDNMirrorList _mirrorList;
+        private DiscordWebHook _discord;
 
 
-        public AuthoredFiles(ILogger<AuthoredFiles> logger, SqlService sql, AppSettings settings, CDNMirrorList mirrorList)
+        public AuthoredFiles(ILogger<AuthoredFiles> logger, SqlService sql, AppSettings settings, CDNMirrorList mirrorList, DiscordWebHook discord)
         {
             _sql = sql;
             _logger = logger;
             _settings = settings;
             _mirrorList = mirrorList;
+            _discord = discord;
         }
 
         [HttpPut]
@@ -78,6 +80,15 @@ namespace Wabbajack.BuildServer.Controllers
 
             definition = await _sql.CreateAuthoredFile(definition, user);
             
+            using (var client = await GetBunnyCdnFtpClient())
+            {
+                await client.CreateDirectoryAsync($"{definition.MungedName}");
+                await client.CreateDirectoryAsync($"{definition.MungedName}/parts");
+            }
+
+            await _discord.Send(Channel.Ham,
+                new DiscordMessage() {Content = $"{user} has started uploading {definition.OriginalFileName} ({definition.Size.ToFileSizeString()})"});
+            
             return Ok(definition.ServerAssignedUniqueId);
         }
         
@@ -101,6 +112,9 @@ namespace Wabbajack.BuildServer.Controllers
             ms.Position = 0;
             await UploadAsync(ms, $"{definition.MungedName}/definition.json.gz");
             
+            await _discord.Send(Channel.Ham,
+                new DiscordMessage {Content = $"{user} has finished uploading {definition.OriginalFileName} ({definition.Size.ToFileSizeString()})"});
+            
             return Ok($"https://{_settings.BunnyCDN_StorageZone}.b-cdn.net/{definition.MungedName}");
         }
 
@@ -115,7 +129,14 @@ namespace Wabbajack.BuildServer.Controllers
         private async Task UploadAsync(Stream stream, string path)
         {
             using var client = await GetBunnyCdnFtpClient();
-            await client.UploadAsync(stream, path);
+            try
+            {
+                await client.UploadAsync(stream, path);
+            }
+            catch (Exception ex)
+            {
+                throw ex;
+            }
         }
 
         [HttpDelete]

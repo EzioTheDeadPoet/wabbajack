@@ -1,11 +1,11 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <OutputType>WinExe</OutputType>
-        <TargetFramework>netcoreapp3.1</TargetFramework>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net5.0-windows</TargetFramework>
         <UseWPF>true</UseWPF>
-        <AssemblyVersion>2.2.2.0</AssemblyVersion>
-        <FileVersion>2.2.2.0</FileVersion>
+        <AssemblyVersion>2.4.2.6</AssemblyVersion>
+        <FileVersion>2.4.2.6</FileVersion>
         <Copyright>Copyright © 2019-2020</Copyright>
         <Description>Wabbajack Application Launcher</Description>
         <PublishReadyToRun>true</PublishReadyToRun>
@@ -13,7 +13,9 @@
         <RuntimeIdentifier>win-x64</RuntimeIdentifier>
         <AssemblyName>Wabbajack</AssemblyName>
         <RootNamespace>Wabbajack</RootNamespace>
-        <IncludeSymbolsInSingleFile>true</IncludeSymbolsInSingleFile>
+        <IncludeSymbolsInSingleFile>false</IncludeSymbolsInSingleFile>
+        <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+        <TrimMode>Link</TrimMode>
     </PropertyGroup>
 
     <PropertyGroup>

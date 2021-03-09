@@ -15,6 +15,7 @@ using Wabbajack.Lib.ModListRegistry;
 using Wabbajack.Server;
 using Wabbajack.Server.DataLayer;
 using Wabbajack.Server.DTOs;
+using Wabbajack.Server.Services;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -84,7 +85,11 @@ namespace Wabbajack.BuildServer.Test
 
         public T GetService<T>()
         {
-            return (T)_host.Services.GetService(typeof(T));
+            var result = (T)_host.Services.GetService(typeof(T));
+
+            if (result == null)
+                throw new Exception($"Service {typeof(T)} not found in configuration");
+            return result;
         }
 
 
@@ -162,6 +167,8 @@ namespace Wabbajack.BuildServer.Test
             _client = new Wabbajack.Lib.Http.Client();
             _authedClient = new Wabbajack.Lib.Http.Client();
             Fixture = fixture.Deref();
+            var cache = Fixture.GetService<MetricsKeyCache>();
+            cache.AddKey(Metrics.GetMetricsKey().Result);
             _authedClient.Headers.Add(("x-api-key", Fixture.APIKey));
             AuthorAPI.ApiKeyOverride = Fixture.APIKey;
             _queue = new WorkQueue();
@@ -211,9 +218,9 @@ namespace Wabbajack.BuildServer.Test
 
             ModListData = new ModList();
             ModListData.Archives.Add(
-                new Archive(new HTTPDownloader.State(MakeURL(modFileName.ToString())))
+                new Archive(new HTTPDownloader.State(MakeURL(modFileName)))
                 {
-                    Hash = await test_archive_path.FileHashAsync(),
+                    Hash = await test_archive_path.FileHashAsync() ?? Hash.Empty,
                     Name = "test_archive",
                     Size = test_archive_path.Size,
                 });
@@ -237,7 +244,7 @@ namespace Wabbajack.BuildServer.Test
                     Description = "A test",
                     DownloadMetadata = new DownloadMetadata
                     {
-                        Hash = await modListPath.FileHashAsync(), 
+                        Hash = await modListPath.FileHashAsync() ?? Hash.Empty, 
                         Size = modListPath.Size
                     },
                     Links = new ModlistMetadata.LinksObject

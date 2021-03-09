@@ -1,4 +1,5 @@
-﻿using System.Threading.Tasks;
+﻿using System.Linq;
+using System.Threading.Tasks;
 using Wabbajack.Common.IO;
 
 namespace Wabbajack.Common
@@ -56,6 +57,21 @@ namespace Wabbajack.Common
                 };
                 return await proc.Start() == 0;
             }
+        }
+
+        public static async Task CompactFolder(this AbsolutePath folder, WorkQueue queue, Algorithm algorithm)
+        {
+            var driveInfo = folder.DriveInfo().DiskSpaceInfo;
+            var clusterSize = driveInfo.SectorsPerCluster * driveInfo.BytesPerSector;
+
+            await folder
+                .EnumerateFiles(true)
+                .Where(f => f.Size > clusterSize)
+                .PMap(queue, async path =>
+                {
+                    Utils.Status($"Compacting {path.FileName}");
+                    await path.Compact(algorithm);
+                });
         }
     }
 }

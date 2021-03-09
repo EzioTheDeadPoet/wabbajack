@@ -1,5 +1,158 @@
 ### Changelog
 
+#### Version - 2.4.2.6 - 2/26/2021
+* Cache Modlist images (based on the URL)
+* Load Gallery images off the GUI thread improving UI performance
+
+#### Version - 2.4.2.5 - 2/24/2021
+* HOTFIX: Fix a O(n*m) performance bug in compilation
+* Add support for Enderal SSE
+
+#### Version - 2.4.2.4 - 2/23/2021
+* Reworked GDrive downloader for better compatability
+* Ignore .cache files for realz
+* Add support for folder tagging in Native Compiler mode (thanks Luca!)
+* Fixed a "file in use" bug with .BA2s during installation
+* Several fixes for Origin game detection
+
+#### Version - 2.4.2.3 - 2/9/2021
+* Remove unused file watcher from ManualDownloader
+* Lower minimum number of threads to 1
+* Added support for Kerbal Space Program
+* Add Origin support for DA:O
+* Stop vaccuming the patch cache (resulting in overuse of resources on some system)
+* Fix reading flags in comments for DeconstructBSAs
+* Update the "Overwrite folder" text to explain that saves are *not* deleted
+* .cache files are now ignored by the compiler
+
+#### Version - 2.4.2.2 - 2/6/2021
+* Better Origin game detection
+* Don't check the download whitelist for files that are already downloaded
+
+#### Version - 2.4.2.1 - 2/4/2021
+* HOTFIX - fix for the download path sometimes being empty
+* HOTFIX - fix for some drive types not being detected (e.g. RAID drives)
+
+#### Version - 2.4.2.0 - 2/3/2021
+* Rework the Nexus Manual Downloading process now with less jank
+* Manual Nexus Downloading now explains why it's so painful, and how to fix it (get Premium)
+* Manual Nexus Downloading no longer opens a ton of CEF processes
+* Manual Nexus Downloading no longer prompts users to download files that don't exist
+* Disabled CloudFlare DDOS mitigation for LoversLab downloading, the site is back to normal now
+
+#### Version - 2.4.1.2 - 1/30/2021
+* Don't install .meta files for files sourced from the game folder
+* Fix bug MO2 archive name detection in .meta files (rare bug with FO4VR and other like games)
+* Catch exceptions when ECS downloads manifest data
+* Don't double-index game files in some situations (duplicate game names in config files)
+* Update all deps
+* Reduce memory usage of open files (may help with memory errors during BSA creation)
+
+#### Version - 2.4.1.1 - 1/13/2021
+* HOTFIX: Fix game file sources that don't have MO2 specific names
+
+#### Version - 2.4.1.0 - 1/12/2021
+* Fix errors with broken SQL DBs crashing the system
+* Fix errors with bad SQL clean commands
+* Warn when the user doesn't have enough swap space
+* Better OS version detection
+* Use case-insensitive comparisons in Game File Downloader's PrimaryKeyString
+
+#### Version - 2.4.0.0 - 1/9/2021
+* Wabbajack is now based on .NET 5.0 (does not require a runtime download by users)
+* Origin is now supported as a game source
+* Basic (mostly untested) support for Dragon Age : Origins, Dragon Age 2, and Dragon Age: Inquisition 
+* Replace RocksDB with SQLite should result in less process contention when running the UI and the CLI at the same time
+* Fixed Regression with CloudFront IPS4 sites not requesting logins before installation
+* Fixed regression that caused us to spam the Nexus with verify calls
+* Further fixes for IPS4 sites
+* Optimized download folder hashing by only hashing files that match a specific size (thanks Unnoen!)
+
+#### Version - 2.3.6.2 - 12/31/2020
+* HOTFIX: Also apply the IPS4 changes to LL Meta lookups
+
+#### Version - 2.3.6.1 - 12/31/2020
+* When IPS4 (e.g. LL) sites based on CEF fail to validate, they no longer hang the app
+* If a IPS4 CEF site throws a 503, or 400 error, retry
+* Clean out the cookies during IPS4 CEF downloads so that they don't cause 400 errors
+* Limit the number of connections to IPS4 sites to 20 per minute (one per 6 seconds)
+* If a site *does* timeout, throw a log of the CEF state into `CEFStates` for easier debugging by the WJ team
+* Wrote a new CLI utility to stress test the Verification routines.
+* Ignore files that have `\Edit Scripts\Export\` in their path
+* Added info/support for GoG's version of Kingdom Come : Deliverance
+
+#### Version - 2.3.6.0 - 12/29/2020
+* Move the LoversLab downloader to a CEF based backed making it interact with CloudFlare a bit better
+* Add support for No Man's Sky
+
+#### Version - 2.3.5.1 - 12/23/2020
+* HOTFIX : Recover from errors in the EGS location detector
+
+#### Version - 2.3.5.0 - 12/16/2020
+* Fix tesall.ru download support
+* Implement MechWarrior 5 support as a native compiler game
+* Make the title in the WJ gallery (in app) optional for games that want the title to be in the splash screen
+* Worked a few kinks out of the native game compiler
+
+#### Version - 2.3.4.3 - 12/6/2020
+* Disable the back button during install/compilation
+
+#### Version - 2.3.4.2 - 11/24/2020
+* Add Support for Kingdom Come : Deliverance (via MO2)
+* Several other small bug fixes and deps updates
+
+#### Version - 2.3.4.1 - 11/15/2020
+* Tell the mod updater to use the existing Nexus Client instead of creating a new one
+
+#### Version - 2.3.4.0 - 11/15/2020
+* Removed the internal Manifest Viewer, you can still view the Manifest of any Modlist on the website
+* Improved Nexus warnings about being low on API calls
+* Added marker for "utility modlists" we will expand on this feature further in later releases
+
+#### Version - 2.3.3.0 - 11/5/2020
+* Game file hashes are now stored on Github instead of on the build server
+* Added CLI Verb to produce these hash files for the Github repo
+* When a user runs out of Nexus API calls we no longer bombard the Nexus with download attempts
+* Check API limits before attempting a modlist download
+* Logger is less chatty about recoverable download errors
+* Display integer progress values during install so users know how far along in the process they are #issue-1156
+
+#### Version - 2.3.2.0 - 11/2/2020
+* 7Zip errors now re-hash the extracted file to check for file corruption issues. Should provide
+better feedback in cases that a file is modified after being downloaded (perhaps by a disk failure)
+* Fixed a file extraction issue with nested archives, most often seen whith the `Lucian` mod
+* Fixed several small bugs and typeos with how open permission mirrored files are handled by Wabbajack
+* Fixed a bug in the `download-url` cli command. It can now download from any Wabbajack CDN domain.
+
+#### Version - 2.3.1.0 - 10/24/2020
+* Fixed a long standing issue with path remapping, lots of edge cases were resolved here
+* Implemented a basic compiler for non MO2 games, will expand as we get feedback
+* Removed unused CPU percentage slider, we now have two settings, so please use the settings panel instead
+
+#### Version - 2.3.0.4 - 10/13/2020
+* Fix FOMOD extraction (for FNV)
+
+#### Version - 2.3.0.3 - 10/12/2020
+* Revert some 7zip changes due to 7zip crashing the app
+
+#### Version - 2.3.0.2 - 10/5/2020
+* Fixed a situation where 7zip would refuse to extract very large archives
+
+#### Version - 2.3.0.1 - 10/4/2020
+* Rewrote the file extraction routines. New code uses less memory, less disk space, and performs less thrashing on HDDs
+* Reworked IPS4 integration to reduce download failures
+* Profiles can now contain an (optional) file `compiler_settings.json` that includes options for other games to be used during install.
+This is now the only way to include extra games in the install process, implicit inclusion has been removed. 
+* Number of download/install threads is now manually set (defaults to CPU cores) and is independently configurable
+* Includes a "Favor performance over RAM" optional mode (defaults to off) that will use excessive amounts of RAM in exchange
+for almost 1GB/sec install speed on the correct hardware. Don't enable this unless you have a fast SSD and at least 2.5GB of RAM for every
+install thread.
+* Fixed Extraction so that zip files no longer cause WJ to CTD
+* Better path logging during install and compilation
+* Fix the "this was created with a newer version of Wabbajack" issue
+* If a downloaded file doesn't match the expected hash, try alternative download locations, if allowed
+
+
 #### Version - 2.2.2.0 - 8/31/2020
 * Route CDN requests through a reverse proxy to improve reliability
 

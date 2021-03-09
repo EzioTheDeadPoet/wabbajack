@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Wabbajack.BuildServer;
 using Wabbajack.Common;
+using Wabbajack.Common.Exceptions;
 using Wabbajack.Lib.NexusApi;
 using Wabbajack.Server.DataLayer;
 
@@ -25,10 +26,26 @@ namespace Wabbajack.Server.Services
             var keys = await _sql.GetNexusApiKeysWithCounts(1500);
             foreach (var key in keys.Where(k => k.Key != _selfKey))
             {
-                return new TrackingClient(_sql, key);
+                try
+                {
+                    var client = new TrackingClient(_sql, key);
+                    if (await client.IsPremium())
+                        return client;
+
+                    _logger.LogWarning($"Purging non premium key");
+                    await _sql.DeleteNexusAPIKey(key.Key);
+                    continue;
+                }
+                catch (Exception ex)
+                {
+                    Utils.Log($"Error getting tracking client: {ex}");
+                }
+
             }
 
-            return await NexusApiClient.Get();
+            var bclient = await NexusApiClient.Get();
+            await bclient.GetUserStatus();
+            return bclient;
         }
         
         public override async Task<int> Execute()
@@ -52,13 +69,16 @@ namespace Wabbajack.Server.Services
                     var (daily, hourly) = await client.GetRemainingApiCalls();
                     await _sql.SetNexusAPIKey(key.Key, daily, hourly);
                 }
+                catch (HttpException ex)
+                {
+                    _logger.Log(LogLevel.Warning, $"Nexus error, not purging API key : {ex.Message}");
+                }
                 catch (Exception ex)
                 {
-                    _logger.Log(LogLevel.Warning, "Update error, purging API key");
+                    _logger.Log(LogLevel.Warning, $"Update error, purging API key : {ex.Message}");
                     await _sql.DeleteNexusAPIKey(key.Key);
                 }
             }
-
             return keys.Count;
         }
     }
@@ -82,7 +102,7 @@ namespace Wabbajack.Server.Services
                 var hourlyRemaining = int.Parse(response.Headers.GetValues("x-rl-hourly-remaining").First());
                 await _sql.SetNexusAPIKey(ApiKey, dailyRemaining, hourlyRemaining);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
             }
         }

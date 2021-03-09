@@ -22,6 +22,7 @@ using File = Alphaleonis.Win32.Filesystem.File;
 using Path = Alphaleonis.Win32.Filesystem.Path;
 using SectionData = Wabbajack.Common.SectionData;
 using System.Collections.Generic;
+using Wabbajack.VirtualFileSystem;
 
 namespace Wabbajack.Lib
 {
@@ -40,7 +41,7 @@ namespace Wabbajack.Lib
                   outputFolder: outputFolder, 
                   downloadFolder: downloadFolder,
                   parameters: parameters,
-                  steps: 21,
+                  steps: 22,
                   game: modList.GameType)
         {
             var gameExe = Consts.GameFolderFilesDir.Combine(modList.GameType.MetaData().MainExecutable!);
@@ -55,7 +56,7 @@ namespace Wabbajack.Lib
             await Metrics.Send(Metrics.BeginInstall, ModList.Name);
             Utils.Log("Configuring Processor");
 
-            Queue.SetActiveThreadsObservable(ConstructDynamicNumThreads(await RecommendQueueSize()));
+            FileExtractor2.FavorPerfOverRAM = FavorPerfOverRam;
 
             if (GameFolder == null)
                 GameFolder = Game.TryGetGameLocation();
@@ -82,6 +83,12 @@ namespace Wabbajack.Lib
                 Utils.Log("Exiting because we couldn't find the game folder.");
                 return false;
             }
+
+            Utils.Log($"Install Folder: {OutputFolder}");
+            Utils.Log($"Downloads Folder: {DownloadFolder}");
+            Utils.Log($"Game Folder: {GameFolder.Value}");
+            Utils.Log($"Wabbajack Folder: {AbsolutePath.EntryPoint}");
+            
             
             var watcher = new DiskSpaceWatcher(cancel, new[]{OutputFolder, DownloadFolder, GameFolder.Value, AbsolutePath.EntryPoint}, (long)2 << 31,
                 drive =>
@@ -96,8 +103,7 @@ namespace Wabbajack.Lib
             await ValidateGameESMs();
 
             if (cancel.IsCancellationRequested) return false;
-            UpdateTracker.NextStep("Validating Modlist");
-            await ValidateModlist.RunValidation(ModList);
+            UpdateTracker.NextStep("Creating Output Folders");
 
             OutputFolder.CreateDirectory();
             DownloadFolder.CreateDirectory();
@@ -111,6 +117,9 @@ namespace Wabbajack.Lib
                 }
             }
 
+            // Reduce to one thread if downloads on HDD, else use specified. Hashing on HDD has no benefit with more threads.
+            if (new PhysicalDisk(DownloadFolder.DriveInfo().Name).MediaType == PhysicalDisk.MediaTypes.HDD && ReduceHDDThreads) DesiredThreads.OnNext(1); else DesiredThreads.OnNext(DiskThreads);
+
             if (cancel.IsCancellationRequested) return false;
             UpdateTracker.NextStep("Optimizing ModList");
             await OptimizeModlist();
@@ -119,9 +128,15 @@ namespace Wabbajack.Lib
             UpdateTracker.NextStep("Hashing Archives");
             await HashArchives();
 
+            // Set to download thread count.
+            DesiredThreads.OnNext(DownloadThreads);
+
             if (cancel.IsCancellationRequested) return false;
             UpdateTracker.NextStep("Downloading Missing Archives");
             await DownloadArchives();
+
+            // Reduce to one thread if downloads on HDD, else use specified. Hashing on HDD has no benefit with more threads.
+            if (new PhysicalDisk(DownloadFolder.DriveInfo().Name).MediaType == PhysicalDisk.MediaTypes.HDD && ReduceHDDThreads) DesiredThreads.OnNext(1); else DesiredThreads.OnNext(DiskThreads);
 
             if (cancel.IsCancellationRequested) return false;
             UpdateTracker.NextStep("Hashing Remaining Archives");
@@ -137,6 +152,9 @@ namespace Wabbajack.Lib
                 else
                     Error("Cannot continue, was unable to download one or more archives");
             }
+
+            // Reduce to two threads if output on HDD, else use specified. Installing files seems to have a slight benefit with two threads.
+            if (new PhysicalDisk(OutputFolder.DriveInfo().Name).MediaType == PhysicalDisk.MediaTypes.HDD && ReduceHDDThreads) DesiredThreads.OnNext(2); else DesiredThreads.OnNext(DiskThreads);
 
             if (cancel.IsCancellationRequested) return false;
             UpdateTracker.NextStep("Extracting Modlist contents");
@@ -178,11 +196,23 @@ namespace Wabbajack.Lib
 
             UpdateTracker.NextStep("Updating System-specific ini settings");
             SetScreenSizeInPrefs();
+            
+            UpdateTracker.NextStep("Compacting files");
+            await CompactFiles();
 
             UpdateTracker.NextStep("Installation complete! You may exit the program.");
+            await ExtractedModlistFolder!.DisposeAsync();
             await Metrics.Send(Metrics.FinishInstall, ModList.Name);
 
             return true;
+        }
+
+        private async Task CompactFiles()
+        {
+            if (this.UseCompression)
+            {
+                await OutputFolder.CompactFolder(Queue, FileCompaction.Algorithm.XPRESS16K);
+            }
         }
 
         private void CreateOutputMods()
@@ -236,15 +266,32 @@ namespace Wabbajack.Lib
 
         private async Task InstallIncludedDownloadMetas()
         {
-            await ModList.Directives
-                   .OfType<ArchiveMeta>()
-                   .PMap(Queue, async directive =>
+            await ModList.Archives
+                   .PMap(Queue, UpdateTracker, async archive =>
                    {
-                       Status($"Writing included .meta file {directive.To}");
-                       var outPath = DownloadFolder.Combine(directive.To);
-                       if (outPath.IsFile) await outPath.DeleteAsync();
-                       await outPath.WriteAllBytesAsync(await LoadBytesFromPath(directive.SourceDataID));
+                       if (HashedArchives.TryGetValue(archive.Hash, out var paths))
+                       {
+                           var metaPath = paths.WithExtension(Consts.MetaFileExtension);
+                           if (!metaPath.Exists && !(archive.State is GameFileSourceDownloader.State))
+                           {
+                               Status($"Writing {metaPath.FileName}");
+                               var meta = AddInstalled(archive.State.GetMetaIni()).ToArray();
+                               await metaPath.WriteAllLinesAsync(meta);
+                           }
+                       }
                    });
+        }
+
+        private IEnumerable<string> AddInstalled(string[] getMetaIni)
+        {
+            foreach (var f in getMetaIni)
+            {
+                yield return f;
+                if (f == "[General]")
+                {
+                    yield return "installed=true";
+                }
+            }
         }
 
         private async ValueTask ValidateGameESMs()
@@ -257,7 +304,7 @@ namespace Wabbajack.Lib
                 var hash = await gameFile.FileHashAsync();
                 if (hash != esm.SourceESMHash)
                 {
-                    Utils.ErrorThrow(new InvalidGameESMError(esm, hash, gameFile));
+                    Utils.ErrorThrow(new InvalidGameESMError(esm, hash ?? Hash.Empty, gameFile));
                 }
             }
         }
@@ -276,7 +323,7 @@ namespace Wabbajack.Lib
                 var bsaSize = bsa.FileStates.Select(state => sourceDir.Combine(state.Path).Size).Sum();
 
                 await using var a = await bsa.State.MakeBuilder(bsaSize);
-                var streams = await bsa.FileStates.PMap(Queue, async state =>
+                var streams = await bsa.FileStates.PMap(Queue, UpdateTracker, async state =>
                 {
                     Status($"Adding {state.Path} to BSA");
                     var fs = await sourceDir.Combine(state.Path).OpenRead();
@@ -287,6 +334,8 @@ namespace Wabbajack.Lib
                 Info($"Writing {bsa.To}");
                 await a.Build(OutputFolder.Combine(bsa.To));
                 streams.Do(s => s.Dispose());
+
+                await sourceDir.DeleteDirectory();
 
                 if (UseCompression)
                     await OutputFolder.Combine(bsa.To).Compact(FileCompaction.Algorithm.XPRESS16K);
@@ -305,7 +354,7 @@ namespace Wabbajack.Lib
             Info("Writing inline files");
             await ModList.Directives
                 .OfType<InlineFile>()
-                .PMap(Queue, async directive =>
+                .PMap(Queue, UpdateTracker, async directive =>
                 {
                     Status($"Writing included file {directive.To}");
                     var outPath = OutputFolder.Combine(directive.To);

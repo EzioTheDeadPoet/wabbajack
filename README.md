@@ -1,16 +1,21 @@
 ﻿# Wabbajack
 
-[![Build Status](https://dev.azure.com/tbaldridge/tbaldridge/_apis/build/status/wabbajack-tools.wabbajack?branchName=master)](https://dev.azure.com/tbaldridge/tbaldridge/_build/latest?definitionId=3&branchName=master)
+[![Discord](https://img.shields.io/discord/605449136870916175)](https://discord.gg/wabbajack)
+[![CI Tests](https://github.com/wabbajack-tools/wabbajack/workflows/CI%20Tests/badge.svg)](https://github.com/wabbajack-tools/wabbajack/actions/workflows/tests.yml)
+[![GitHub all releases](https://img.shields.io/github/downloads/wabbajack-tools/wabbajack/total)](https://github.com/wabbajack-tools/wabbajack/releases)
 
 Wabbajack is an automated Modlist Installer that can reproduce an entire modding setup on another machine without bundling any assets or re-distributing any mods.
 
 ## Social Links
 
-- [wabbajack.org](https://www.wabbajack.org) The official Wabbajack website with a [Gallery](https://www.wabbajack.org/modlists/gallery) and [Status Dashboard](https://www.wabbajack.org/modlists/status) for official Modlists.
+- [wabbajack.org](https://www.wabbajack.org) The official Wabbajack website with a [Gallery](https://www.wabbajack.org/#/modlists/gallery), [Status Dashboard](https://www.wabbajack.org/#/modlists/status) and [Archive Search](https://www.wabbajack.org/#/modlists/search/all) for official Modlists.
 - [Discord](https://discord.gg/wabbajack) The official Wabbajack discord for instructions, Modlists, support or friendly chatting with fellow modders.
 - [Patreon](https://www.patreon.com/user?u=11907933) contains update posts and keeps the [Code Signing Certificate](https://www.digicert.com/code-signing/) as well as our supplementary build server alive.
 
 ## Supported Games and Mod Manager
+
+If you own a game on this list on the Epic Games Store, and the store isn't listed as suppoted, please get in touch on [Discord](https://discord.gg/wabbajack), so you can help us make Wabbajack support those versions as well.
+This is needed, since the EGS has no public database of its game IDs.
 
 | Game                      | Platform              | Versions  | Notes |
 |---------------------------|-----------------------|-----------|-------|
@@ -21,16 +26,27 @@ Wabbajack is an automated Modlist Installer that can reproduce an entire modding
 | Skyrim                    | Steam                 |           |       |
 | Skyrim Special Edition    | Steam                 |           |       |
 | Enderal                   | Steam                 |           |       |
+| Enderal Special Edition   | Steam                 |           |       |
 | Fallout 4                 | Steam                 |           |       |
 | Skyrim VR                 | Steam                 |           |       |
 | Fallout 4 VR              | Steam                 |           |       |
-| Darkest Dungeon           | Steam, GOG            |           | Experimental |
+| Darkest Dungeon           | Steam, GOG, Epic Games Store |    | Experimental |
 | The Witcher 3             | Steam, GOG            | Normal and GotY | Experimental |
 | Stardew Valley            | Steam, GOG            |           | Experimental |
+| Kingdom Come: Deliverance | Steam, GOG            |           | Experimental |
+| Mechwarrior 5: Mercenaries| Epic Games Store      |           | Experimental |
+| No Man's Sky              | Steam, GOG            |           | Experimental |
+| Dragon Age Origins        | Stean, GOG, Origin    |           | Experimental |
+| Dragon Age 2              | Steam, Origin         |           | Experimental |
+| Dragon Age Inquisition    | Steam, Origin         |           | Experimental |
+| Kerbal Space Program      | Steam, GOG            |           | Experimental |
+   
 
-**Note about games marked with experiment support**:
+**Note about games marked with experimental support**:
 
-A new MO2 plugin called [Simple Games Plugin](https://github.com/ModOrganizer2/modorganizer-basic_games) enables the easy creation of new game plugins for non BGS games. This is still very experimental in both MO2 and Wabbajack.
+A new MO2 plugin called [Basic Games Plugin](https://github.com/ModOrganizer2/modorganizer-basic_games) enables the easy creation of new game plugins for non BGS games. This is still very experimental in both MO2 and Wabbajack.
+
+Some like Mechwarrior 5 use a complete new method of creating a list found [here](https://github.com/wabbajack-tools/wabbajack/wiki/Native-Game-Installer---(Installers-not-using-MO2)), for more info on that best join the [Discord](https://discord.gg/wabbajack) for guidance.
 
 ## Installing a Modlist
 
@@ -111,6 +127,18 @@ There are some special cases where you want to change the default Wabbajack beha
 | `WABBAJACK_ALWAYS_ENABLE` | The mod will not be ignored by Wabbajack even if it's disabled | Wabbajack will normally ignore all mods you disabled in MO2 but there are some cases where you might want to give some choice to the end user and want to have the mod included |
 | `WABBAJACK_ALWAYS_DISABLE` | The mod will always be ignored by Wabbajack | Useful if you don't want some mods included in the Modlist but still want to keep it active in your own setup |
 
+#### Folder Tags
+
+You can create an empty `tagfile` with no extention in any folder you want to apply this tags to. This is meant to be used with folders that aren't mods.
+
+| Flag/File | Description | Notes |
+|------|-------------|-------|
+| `WABBAJACK_INCLUDE` | All files in this folder will be inlined into the `.wabbajack` file | |
+| `WABBAJACK_NOMATCH_INCLUDE` | All files in this folder will be inlined into the `.wabbajack` file even if Wabbajack did not found a match for them. | Useful for generated files.|
+| `WABBAJACK_IGNORE` | All files in this folder will be ignored by Wabbajack and therefore not be put into into the `.wabbajack` file. | Useful for tools or other things outside a mod you don't want/need reproduced on a users machine. Handle with care since excluded stuff can potentially break a setup.\* |
+
+\*It will finish the installation of a modlist, but the installed list might not run if you excluded a crutial part of it.
+
 #### Patches
 
 Reading all the previous section you might wonder if Wabbajack is able to detect modified files and how it deals with them. Wabbajack can't include the modified file so instead we just include the difference between the original and modified version.
@@ -152,7 +180,7 @@ In Wabbajack select _Create a Modlist_ to navigate to the configuration screen. 
 | Field | Description | Notes |
 |-------|-------------|-------|
 | Modlist Name | **REQUIRED:** Name of your Modlist | |
-| Version | **REQUIRED:** Current Version | Do note that this has to be a real Version and not some random text like "The best version on Earth", this is Wabbajack not the Nexus! |
+| Version | **REQUIRED:** Current Version | Do note that this has to be a semantic version and not some random text like "The best version on Earth" (this is not the Nexus)! |
 | Author | Modlist Author | Should be your name in original Modlists and/or the name of the original Modlist author if you adapted a normal Modlist to a Wabbajack Modlist |
 | Description | 700 characters Descriptions | |
 | Image | Modlist Image | Aspect ratio should be 16:9 for the best result |
@@ -192,12 +220,13 @@ Example structure for a good README:
 Some Modlists that host all their stuff on GitHub:
 
 - the OG GitHub Modlist: [Lotus](https://github.com/erri120/lotus)
+- [Keizaal](https://github.com/PierreDespereaux/Keizaal)
 - [Living Skyrim](https://github.com/ForgottenGlory/Living-Skyrim-2)
-- [Eldersouls](https://github.com/jdsmith2816/eldersouls)
+- [Elder Souls](https://github.com/jdsmith2816/eldersouls)
 - [Total Visual Overhaul](https://github.com/NotTotal/Total-Visual-Overhaul)
 - [Serenity](https://github.com/ixanza/serenity)
 - [MOISE](https://github.com/ForgottenGlory/MOISE)
-- [Cupid](https://github.com/ForgottenGlory/MOISE)
+- [Dungeons & Deviousness](https://github.com/ForgottenGlory/Dungeons-Deviousness)
 
 ### Meta Files
 
@@ -233,10 +262,9 @@ Mods can also be hosted somewhere else, eg on other modding sites like LoversLab
 | [TES Alliance](http://tesalliance.org/) | Yes | No | IPS4 Site Prefix: `http://tesalliance.org/forums/index.php?` | `directURL=http://tesalliance.org/forums/index.php?/files/file/2035-wabbajack-test-file/` | IPS4 Site, mostly single-file downloads |
 | [TESAll](https://tesall.ru) | Yes | No | IPS4 Site Prefix: `https://tesall.ru` | `directURL=https://tesall.ru/files/getdownload/594545-wabbajack-test-file/` | IPS4 Site, mostly single-file downloads |
 | [ModDB](https://www.moddb.com/) | No | No | `directURL=https://www.moddb.com/downloads/start/{ID}` | `https://www.moddb.com/downloads/start/124908` | Downloads can be very slow |
-| [Bethesda.net](https://bethesda.net) | No | No | `directURL=https://bethesda.net/en/mods/{GAME}/mod-detail/{ID}` | `directURL=https://bethesda.net/en/mods/skyrim/mod-detail/4145641` | |
 | [Patreon](https://www.patreon.com/) | No | Yes | `directURL=https://www.patreon.com/file?h={ID1}i={ID2}` | `directURL=https://www.patreon.com/file?h=34874668&i=5247431` | Only public downloads, paywalled downloads can not be downloaded |
 | [GitHub](https://github.com/) | No | No | `directURL=https://github.com/{USER}/{REPO}/releases/download/{TAG}/{FILE}` | `directURL=https://github.com/ModOrganizer2/modorganizer/releases/download/v2.3.1/Mod.Organizer-2.3.1.7z` | |
-| [GDrive](https://drive.google.com/) | No | Yes | `directURL=https://drive.google.com/file/d/{ID}` | `directURL=https://drive.google.com/file/d/1grLRTrpHxlg7VPxATTFNfq2OkU_Plvh_/` | GDrive is known to not be a reliable file hosting service as a file can get temporarily inaccessible if too many users try to download it |
+| [Google Drive](https://drive.google.com/) | No | Yes | `directURL=https://drive.google.com/file/d/{ID}` | `directURL=https://drive.google.com/file/d/1grLRTrpHxlg7VPxATTFNfq2OkU_Plvh_/` | Google Drive is known to not be a reliable file hosting service as a file can get temporarily inaccessible if too many users try to download it |
 | [MEGA](https://mega.nz/) | No (Optional) | Yes | `directURL=https://mega.nz/#!{ID}` | `directURL=https://mega.nz/#!CsMSFaaJ!-uziC4mbJPRy2e4pPk8Gjb3oDT_38Be9fzZ6Ld4NL-k` | MEGA has a 5GB transfer quota on non-premium users, even less for non-registered ones. It is recommended to login to MEGA before downloading any files |
 | [Mediafire](https://www.mediafire.com/) | No | Yes | `directURL=https://www.mediafire.com/file/{FILE}` | `directURL=http://www.mediafire.com/file/agiqzm1xwebczpx/WABBAJACK_TEST_FILE.txt` | Medafire downloads are known to fail from time to time |
 | [Dropbox](https://www.dropbox.com/) | No | Yes | `directURL=https://www.dropbox.com/s/{FILE}?dl=0` | `directURL=https://www.dropbox.com/s/5hov3m2pboppoc2/WABBAJACK_TEST_FILE.txt?dl=0` | |
@@ -254,7 +282,7 @@ No, as specified in the [License](#license--copyright), Wabbajack Modlists must 
 
 **Can I accept donations for my installer?**
 
-Absolutely! As long as the act of donating does not entitle the donator to access to the installer. The installer must be free, donations must be a "thank you" not a purchase of services or content.
+Absolutely! As long as the act of donating does not entitle the donator to access to the installer. The installer must be free, donations must be a "thank you" - not a purchase of services or content.
 
 ### For Mod Authors
 
@@ -266,7 +294,7 @@ Wabbajack uses the official [Nexus API](https://app.swaggerhub.com/apis-docs/Nex
 
 As explained before:
 
-> we use the official [Nexus API](https://app.swaggerhub.com/apis-docs/NexusMods/nexus-mods_public_api_params_in_form_data/1.0#/) to retrieve download links from the Nexus.
+> We use the official [Nexus API](https://app.swaggerhub.com/apis-docs/NexusMods/nexus-mods_public_api_params_in_form_data/1.0#/) to retrieve download links from the Nexus.
 
 Everyone who has access to the Nexus can download your mod. The Nexus does not and can not lock out Wabbajack from using the API to download a specific mod based on _author preferences_.
 

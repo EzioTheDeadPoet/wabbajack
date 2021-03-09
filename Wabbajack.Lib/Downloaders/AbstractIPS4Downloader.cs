@@ -5,23 +5,36 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
 using F23.StringSimilarity;
 using HtmlAgilityPack;
 using Newtonsoft.Json;
 using Wabbajack.Common;
+using Wabbajack.Lib.LibCefHelpers;
 using Wabbajack.Lib.Validation;
+using Wabbajack.Lib.WebAutomation;
 
 namespace Wabbajack.Lib.Downloaders
 {
+
+    interface IWaitForWindowDownloader
+    {
+        public Task WaitForNextRequestWindow();
+    }
     // IPS4 is the site used by LoversLab, VectorPlexus, etc. the general mechanics of each site are the 
     // same, so we can fairly easily abstract the state.
     // Pass in the state type via TState
-    public abstract class AbstractIPS4Downloader<TDownloader, TState> : AbstractNeedsLoginDownloader, IDownloader
+    public abstract class AbstractIPS4Downloader<TDownloader, TState> : AbstractNeedsLoginDownloader, IDownloader, IWaitForWindowDownloader
         where TState : AbstractIPS4Downloader<TDownloader, TState>.State<TDownloader>, new()
         where TDownloader : IDownloader
     {
+
+        private DateTime LastRequestTime = default;
+        protected long RequestsPerMinute = 60;
+        private TimeSpan RequestDelay => TimeSpan.FromMinutes(1) / RequestsPerMinute;
+
         protected AbstractIPS4Downloader(Uri loginUri, string encryptedKeyName, string cookieDomain, string loginCookie = "ips4_member_id")
             : base(loginUri, encryptedKeyName, cookieDomain, loginCookie)
         {
@@ -31,6 +44,27 @@ namespace Wabbajack.Lib.Downloaders
         { 
             Uri url = DownloaderUtils.GetDirectURL(archiveINI);
             return await GetDownloaderStateFromUrl(url, quickMode);
+        }
+
+        public async Task WaitForNextRequestWindow()
+        {
+            TimeSpan delay;
+            lock (this)
+            {
+                if (LastRequestTime < DateTime.UtcNow - RequestDelay)
+                {
+                    LastRequestTime = DateTime.UtcNow;
+                    delay = TimeSpan.Zero;
+                }
+                else
+                {
+                    LastRequestTime += RequestDelay;
+                    delay = LastRequestTime - DateTime.UtcNow;
+                }
+            }
+
+            Utils.Log($"Waiting for {delay.TotalSeconds} to make request via {typeof(TDownloader).Name}");
+            await Task.Delay(delay);
         }
 
         public async Task<AbstractDownloadState?> GetDownloaderStateFromUrl(Uri url, bool quickMode)
@@ -51,11 +85,11 @@ namespace Wabbajack.Lib.Downloaders
             {
                 var id2 = HttpUtility.ParseQueryString(url.Query)["r"];
                 var parsed = HttpUtility.ParseQueryString(url.Query);
-                var name = parsed[null].Split("/", StringSplitOptions.RemoveEmptyEntries).Last();
+                var name = parsed[null]!.Split("/", StringSplitOptions.RemoveEmptyEntries).Last();
                 return new TState
                 {
                     FullURL = url.AbsolutePath,
-                    FileID = id2,
+                    FileID = id2!,
                     FileName = name
                 };
             }
@@ -68,6 +102,16 @@ namespace Wabbajack.Lib.Downloaders
                     IsAttachment = true
                 };
             }
+            
+            
+            if (url.PathAndQuery.StartsWith("/files/download/") && long.TryParse(url.PathAndQuery.Split("/").Last(), out var fileId))
+            {
+                return new TState
+                {
+                    FullURL = url.ToString(),
+                    IsAttachment = true
+                };
+            }
            
             if (!url.PathAndQuery.StartsWith("/files/file/"))
             {
@@ -75,6 +119,7 @@ namespace Wabbajack.Lib.Downloaders
                 if (!url.Query.Substring(1).StartsWith("/files/file/")) return null;
                 absolute = false;
             }
+
 
             var id = HttpUtility.ParseQueryString(url.Query)["r"];
             var file = absolute
@@ -84,7 +129,7 @@ namespace Wabbajack.Lib.Downloaders
             return new TState
             {
                 FullURL = url.AbsolutePath,
-                FileID = id,
+                FileID = id!,
                 FileName = file
             };
         }
@@ -137,16 +182,15 @@ namespace Wabbajack.Lib.Downloaders
 
             public override async Task<bool> Download(Archive a, AbsolutePath destination)
             {
-                using var stream = await ResolveDownloadStream(a);
-                if (stream == null) return false;
-                await using var fromStream = await stream.Content.ReadAsStreamAsync();
-                await using var toStream = await destination.Create();
-                await fromStream.CopyToAsync(toStream);
-                return true;
+                if (Downloader.IsCloudFlareProtected) 
+                    await ((IWaitForWindowDownloader)Downloader).WaitForNextRequestWindow();
+                return await ResolveDownloadStream(a, destination, false);
             }
 
-            private async Task<HttpResponseMessage?> ResolveDownloadStream(Archive a)
+            private async Task<bool> ResolveDownloadStream(Archive a, AbsolutePath path, bool quickMode, CancellationToken? token = null)
             {
+
+                
                 TOP:
                 string url;
                 if (IsAttachment)
@@ -155,20 +199,12 @@ namespace Wabbajack.Lib.Downloaders
                 }
                 else
                 {
-                    var csrfURL = string.IsNullOrWhiteSpace(FileID)
-                        ? $"{Site}/files/file/{FileName}/?do=download"
-                        : $"{Site}/files/file/{FileName}/?do=download&r={FileID}";
-                    var html = await Downloader.AuthedClient.GetStringAsync(csrfURL);
+                    var csrfKey = await GetCsrfKey(token);
 
-                    var pattern = new Regex("(?<=csrfKey=).*(?=[&\"\'])|(?<=csrfKey: \").*(?=[&\"\'])");
-                    var matches = pattern.Matches(html).Cast<Match>();
-                    
-                    var csrfKey = matches.Where(m => m.Length == 32).Select(m => m.ToString()).FirstOrDefault();
-
-                    if (csrfKey == null)
+                    if (!Downloader.IsCloudFlareProtected && csrfKey == null)
                     {
                         Utils.Log($"Returning null from IPS4 Downloader because no csrfKey was found");
-                        return null;
+                        return false;
                     }
 
                     var sep = Site.EndsWith("?") ? "&" : "?";
@@ -176,8 +212,20 @@ namespace Wabbajack.Lib.Downloaders
                         ? $"{Site}/files/file/{FileName}/{sep}do=download&confirm=1&t=1&csrfKey={csrfKey}"
                         : $"{Site}/files/file/{FileName}/{sep}do=download&r={FileID}&confirm=1&t=1&csrfKey={csrfKey}";
                 }
+                
+                if (Downloader.IsCloudFlareProtected)
+                {
+                    using var driver = await Downloader.GetAuthedDriver();
+                    var size = await driver.NavigateToAndDownload(new Uri(url), path, quickMode: quickMode, token);
 
-                var streamResult = await Downloader.AuthedClient.GetAsync(url);
+                    if (a.Size == 0 || size == 0 || a.Size == size) return true;
+
+                    Utils.Log($"Bad Header Content sizes {a.Size} vs {size}");
+                    return false;
+
+                }
+
+                var streamResult = await GetDownloadAsync(new Uri(url));
                 if (streamResult.StatusCode != HttpStatusCode.OK)
                 {
                     Utils.ErrorThrow(new InvalidOperationException(), $"{Downloader.SiteName} servers reported an error for file: {FileID}");
@@ -185,7 +233,7 @@ namespace Wabbajack.Lib.Downloaders
 
                 var contentType = streamResult.Content.Headers.ContentType;
 
-                if (contentType.MediaType != "application/json")
+                if (contentType!.MediaType != "application/json")
                 {
                     var headerVar = a.Size == 0 ? "1" : a.Size.ToString();
                     long headerContentSize = 0;
@@ -199,10 +247,26 @@ namespace Wabbajack.Lib.Downloaders
                     if (a.Size != 0 && headerContentSize != 0 && a.Size != headerContentSize)
                     {
                         Utils.Log($"Bad Header Content sizes {a.Size} vs {headerContentSize}");
-                        return null;
+                        return false;
                     }
 
-                    return streamResult;
+                    await using (var os = await path.Create())
+                    await using (var ins = await streamResult.Content.ReadAsStreamAsync())
+                    {
+                        if (a.Size == 0)
+                        {
+                            Utils.Status($"Downloading {a.Name}");
+                            await ins.CopyToAsync(os);
+                        }
+                        else
+                        {
+                            await ins.CopyToWithStatusAsync(headerContentSize, os, $"Downloading {a.Name}");
+                        }
+                    }
+
+                    streamResult.Dispose();
+
+                    return true;
                 }
 
                 // Sometimes LL hands back a json object telling us to wait until a certain time
@@ -210,12 +274,33 @@ namespace Wabbajack.Lib.Downloaders
                 var secs = times.Download - times.CurrentTime;
                 for (int x = 0; x < secs; x++)
                 {
+                    if (quickMode) return true;
                     Utils.Status($"Waiting for {secs} at the request of {Downloader.SiteName}", Percent.FactoryPutInRange(x, secs));
+                    Utils.Log($"Waiting for {secs} at the request of {Downloader.SiteName}, {secs - x} remaining");
                     await Task.Delay(1000);
                 }
                 streamResult.Dispose();
                 Utils.Status("Retrying download");
                 goto TOP;
+            }
+
+            private async Task<string?> GetCsrfKey(CancellationToken? token)
+            {
+                var csrfURL = string.IsNullOrWhiteSpace(FileID)
+                    ? $"{Site}/files/file/{FileName}/?do=download"
+                    : $"{Site}/files/file/{FileName}/?do=download&r={FileID}";
+                var html = await GetStringAsync(new Uri(csrfURL), token);
+
+                var pattern = new Regex("(?<=csrfKey=).*(?=[&\"\'])|(?<=csrfKey: \").*(?=[&\"\'])");
+                var matches = pattern.Matches(html).Cast<Match>();
+
+                var csrfKey = matches.Where(m => m.Length == 32).Select(m => m.ToString()).FirstOrDefault();
+                return csrfKey;
+            }
+
+            private async Task DeleteOldDownloadCookies(Driver driver)
+            {
+                await driver.DeleteCookiesWhere(c => c.Name.StartsWith("ips4_downloads_delay_") && c.Value == "-1");
             }
 
             private class WaitResponse
@@ -226,14 +311,13 @@ namespace Wabbajack.Lib.Downloaders
                 public int CurrentTime { get; set; }
             }
 
-            public override async Task<bool> Verify(Archive a)
+            public override async Task<bool> Verify(Archive a, CancellationToken? token)
             {
-                var stream = await ResolveDownloadStream(a);
-                if (stream == null)
-                    return false;
-
-                stream.Dispose();
-                return true;
+                if (Downloader.IsCloudFlareProtected) 
+                    await ((IWaitForWindowDownloader)Downloader).WaitForNextRequestWindow();
+                await using var tp = new TempFile();
+                var isValid = await ResolveDownloadStream(a, tp.Path, true, token: token);
+                return isValid;
             }
             
             public override IDownloader GetDownloader()
@@ -243,6 +327,7 @@ namespace Wabbajack.Lib.Downloaders
 
             public override async Task<(Archive? Archive, TempFile NewFile)> FindUpgrade(Archive a, Func<Archive, Task<AbsolutePath>> downloadResolver)
             {
+                await ((IWaitForWindowDownloader)Downloader).WaitForNextRequestWindow();
                 var files = await GetFilesInGroup();
                 var nl = new Levenshtein();
 
@@ -257,14 +342,15 @@ namespace Wabbajack.Lib.Downloaders
                     if (await newFile.State.Download(newFile, tmp.Path))
                     {
                         newFile.Size = tmp.Path.Size;
-                        newFile.Hash = await tmp.Path.FileHashAsync();
+                        var tmpHash = await tmp.Path.FileHashAsync();
+                        if (tmpHash == null) return default;
+                        newFile.Hash = tmpHash.Value;
                         return (newFile, tmp);
                     }
 
                     await tmp.DisposeAsync();
                 }
                 return default;
-
             }
 
             public override async Task<bool> ValidateUpgrade(Hash srcHash, AbstractDownloadState newArchiveState)
@@ -274,7 +360,17 @@ namespace Wabbajack.Lib.Downloaders
 
             public async Task<List<Archive>> GetFilesInGroup()
             {
-                var others = await Downloader.AuthedClient.GetHtmlAsync($"{Site}/files/file/{FileName}?do=download");
+                var token = new CancellationTokenSource();
+                token.CancelAfter(TimeSpan.FromMinutes(10));
+
+                var csrfKey = await GetCsrfKey(token.Token);
+                if (csrfKey == null)
+                {
+                    Utils.Log($"Could not load CRSF key");
+                    return new List<Archive>();
+                }
+                
+                var others = await GetHtmlAsync(new Uri($"{Site}/files/file/{FileName}?do=download&csrfKey={csrfKey}"), token.Token);
 
                 var pairs = others.DocumentNode.SelectNodes("//a[@data-action='download']")
                     .Select(item => (item.GetAttributeValue("href", ""),
@@ -299,6 +395,70 @@ namespace Wabbajack.Lib.Downloaders
             public override string GetManifestURL(Archive a)
             {
                 return IsAttachment ? FullURL : $"{Site}/files/file/{FileName}/?do=download&r={FileID}";
+            }
+
+            public async Task<string> GetStringAsync(Uri uri, CancellationToken? token = null)
+            {
+                if (!Downloader.IsCloudFlareProtected)
+                    return await Downloader.AuthedClient.GetStringAsync(uri, token);
+
+                
+                using var driver = await Downloader.GetAuthedDriver();
+                await ((IWaitForWindowDownloader)Downloader).WaitForNextRequestWindow();
+                await DeleteOldDownloadCookies(driver);
+
+                //var drivercookies = await Helpers.GetCookies("loverslab.com");
+                
+                //var cookies = await ClientAPI.GetAuthInfo<Helpers.Cookie[]>("loverslabcookies");
+                //await Helpers.IngestCookies(uri.ToString(), cookies);
+                await driver.NavigateTo(uri, token);
+                if ((token ?? CancellationToken.None).IsCancellationRequested)
+                    return "";
+
+                var source = await driver.GetSourceAsync();
+                
+                
+                /*
+                Downloader.AuthedClient.Cookies.Add(drivercookies.Where(dc => dc.Name == "cf_clearance")
+                    .Select(dc => new Cookie
+                    {
+                        Name = dc.Name,
+                        Domain = dc.Domain,
+                        Value = dc.Value,
+                        Path = dc.Path
+                    })
+                    .FirstOrDefault());
+
+                var source = await Downloader.AuthedClient.GetStringAsync(uri);
+                */
+                return source;
+            }
+            
+            public async Task<HtmlDocument> GetHtmlAsync(Uri s, CancellationToken? token = null)
+            {
+                var body = await GetStringAsync(s, token);
+                var doc = new HtmlDocument();
+                doc.LoadHtml(body);
+                return doc;
+            }
+
+            public async Task<HttpResponseMessage> GetDownloadAsync(Uri uri)
+            {
+                if (!Downloader.IsCloudFlareProtected)
+                    return await Downloader.AuthedClient.GetAsync(uri);
+
+                using var driver = await Downloader.GetAuthedDriver();
+                TaskCompletionSource<Uri?> promise = new();
+                driver.DownloadHandler = uri1 =>
+                {
+                    promise.SetResult(uri);
+                };
+                await driver.NavigateTo(uri);
+
+                var url = await promise.Task;
+                if (url == null) throw new Exception("No Url to download");
+                var location = await driver.GetLocation();
+                return await Helpers.GetClient(await Helpers.GetCookies(), location!.ToString()).GetAsync(uri);
             }
 
             public override string[] GetMetaIni()

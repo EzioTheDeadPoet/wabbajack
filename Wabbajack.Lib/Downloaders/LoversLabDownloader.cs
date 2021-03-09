@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
 using HtmlAgilityPack;
@@ -20,6 +21,7 @@ namespace Wabbajack.Lib.Downloaders
         public LoversLabDownloader() : base(new Uri("https://www.loverslab.com/login"), 
             "loverslabcookies", "loverslab.com")
         {
+            IsCloudFlareProtected = false;
         }
         protected override async Task WhileWaiting(IWebDriver browser)
         {
@@ -43,7 +45,9 @@ namespace Wabbajack.Lib.Downloaders
 
             public override async Task<bool> LoadMetaData()
             {
-                var html = await Downloader.AuthedClient.GetStringAsync(URL);
+                var cts = new CancellationTokenSource();
+                cts.CancelAfter(Consts.MaxVerifyTime);
+                var html = await GetStringAsync(URL, cts.Token);
                 var doc = new HtmlDocument();
                 doc.LoadHtml(html);
                 var node = doc.DocumentNode;

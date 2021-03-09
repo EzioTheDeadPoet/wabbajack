@@ -12,6 +12,9 @@ namespace Wabbajack.Common.StoreHandlers
     {
         public override Game Game { get; internal set; }
         public override StoreType Type { get; internal set; } = StoreType.BethNet;
+
+        public AbsolutePath InstallPath;
+        
     }
 
     public class BethNetHandler : AStoreHandler
@@ -87,11 +90,11 @@ namespace Wabbajack.Common.StoreHandlers
                 {
                     var files = d.EnumerateFiles();
                     var game = GameRegistry.Games.Values
-                        .FirstOrDefault(g => g.RequiredFiles.All(f =>
+                        .FirstOrDefault(g => g.RequiredFiles?.All(f =>
                         {
                             var absPath = new RelativePath(f).RelativeTo(d);
                             return files.Contains(absPath);
-                        }));
+                        }) ?? true);
 
                     if (game != null)
                     {

@@ -11,8 +11,7 @@ namespace Wabbajack.Common
 {
     public static class Consts
     {
-        public static Version? CurrentWabbajackVersion { get; set; }
-        
+        public static Version? CurrentMinimumWabbajackVersion = new Version("2.2.2.0");
         public static bool TestMode { get; set; } = false;
 
         public static RelativePath GameFolderFilesDir = (RelativePath)"Game Folder Files";
@@ -47,6 +46,7 @@ namespace Wabbajack.Common
         public static string WABBAJACK_ALWAYS_ENABLE = "WABBAJACK_ALWAYS_ENABLE";
         public static string WABBAJACK_ALWAYS_DISABLE = "WABBAJACK_ALWAYS_DISABLE";
         public static string WABBAJACK_NOMATCH_INCLUDE = "WABBAJACK_NOMATCH_INCLUDE";
+        public static string WABBAJACK_IGNORE = "WABBAJACK_IGNORE";
 
         public static string GAME_PATH_MAGIC_BACK = "{--||GAME_PATH_MAGIC_BACK||--}";
         public static string GAME_PATH_MAGIC_DOUBLE_BACK = "{--||GAME_PATH_MAGIC_DOUBLE_BACK||--}";
@@ -85,6 +85,7 @@ namespace Wabbajack.Common
 
         public static string ServerWhitelistURL = "https://raw.githubusercontent.com/wabbajack-tools/opt-out-lists/master/ServerWhitelist.yml";
         public static string ModlistMetadataURL = "https://raw.githubusercontent.com/wabbajack-tools/mod-lists/master/modlists.json";
+        public static string UtilityModlistMetadataURL = "https://raw.githubusercontent.com/wabbajack-tools/mod-lists/master/utility_modlists.json";
         public static string UnlistedModlistMetadataURL = "https://raw.githubusercontent.com/wabbajack-tools/mod-lists/master/unlisted_modlists.json";
         public static string ModlistSummaryURL = "http://build.wabbajack.org/lists/status.json";
         public static string UserAgent
@@ -131,6 +132,13 @@ namespace Wabbajack.Common
         public static AbsolutePath SettingsFile => LocalAppDataPath.Combine("settings.json");
         public static RelativePath SettingsIni = (RelativePath)"settings.ini";
         public static byte SettingsVersion => 2;
+        public static TimeSpan MaxVerifyTime => TimeSpan.FromMinutes(10);
+        public static readonly string WabbajackAuthoredFilesPrefix = "https://wabbajack.b-cdn.net/";
+
+        public static RelativePath NativeSettingsJson = (RelativePath)"native_compiler_settings.json";
+
+        public static bool IsServer = false;
+
         public static string CompressedBodyHeader = "x-compressed-body";
 
         public static AbsolutePath CefCacheLocation = @"CEF".RelativeTo(LocalAppDataPath);

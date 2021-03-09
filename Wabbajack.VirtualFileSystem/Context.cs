@@ -8,7 +8,10 @@ using System.Reactive.Subjects;
 using System.Text;
 using System.Threading.Tasks;
 using Alphaleonis.Win32.Filesystem;
+using ICSharpCode.SharpZipLib.Zip.Compression.Streams;
 using Wabbajack.Common;
+using Wabbajack.Common.StatusFeed.Errors;
+using Wabbajack.VirtualFileSystem.ExtractedFiles;
 using Directory = Alphaleonis.Win32.Filesystem.Directory;
 using File = System.IO.File;
 using FileInfo = Alphaleonis.Win32.Filesystem.FileInfo;
@@ -42,6 +45,8 @@ namespace Wabbajack.VirtualFileSystem
 
         public WorkQueue  Queue { get; }
         public bool UseExtendedHashes { get; set; }
+        
+        public bool FavorPerfOverRAM { get; set; }
 
         public Context(WorkQueue queue, bool extendedHashes = false)
         {
@@ -71,7 +76,7 @@ namespace Wabbajack.VirtualFileSystem
                                         return found;
                                 }
 
-                                return await VirtualFile.Analyze(this, null, new RootDiskFile(f), f, 0);
+                                return await VirtualFile.Analyze(this, null, new NativeFileStreamFactory(f), f, 0);
                             });
 
             var newIndex = await IndexRoot.Empty.Integrate(filtered.Concat(allFiles).ToList());
@@ -103,7 +108,7 @@ namespace Wabbajack.VirtualFileSystem
                             return found;
                     }
 
-                    return await VirtualFile.Analyze(this, null, new RootDiskFile(f), f, 0);
+                    return await VirtualFile.Analyze(this, null, new NativeFileStreamFactory(f), f, 0);
                 });
 
             var newIndex = await IndexRoot.Empty.Integrate(filtered.Concat(allFiles).ToList());
@@ -196,47 +201,68 @@ namespace Wabbajack.VirtualFileSystem
             }
         }
 
-        public async Task<Func<Task>> Stage(IEnumerable<VirtualFile> files)
-        {
-            await _cleanupTask;
 
-            var grouped = files.SelectMany(f => f.FilesInFullPath)
+        /// <summary>
+        /// Extracts a file
+        /// </summary>
+        /// <param name="queue">Work queue to use when required by some formats</param>
+        /// <param name="files">Predefined list of files to extract, all others will be skipped</param>
+        /// <param name="callback">Func called for each file extracted</param>
+        /// <param name="tempFolder">Optional: folder to use for temporary storage</param>
+        /// <param name="updateTracker">Optional: Status update tracker</param>
+        /// <returns></returns>
+        /// <exception cref="Exception"></exception>
+        public async Task Extract(WorkQueue queue, HashSet<VirtualFile> files, Func<VirtualFile, IExtractedFile, ValueTask> callback, AbsolutePath? tempFolder = null, StatusUpdateTracker updateTracker = null)
+        {
+            var top = new VirtualFile();
+            var filesByParent = files.SelectMany(f => f.FilesInFullPath)
                 .Distinct()
-                .Where(f => f.Parent != null)
-                .GroupBy(f => f.Parent)
-                .OrderBy(f => f.Key?.NestingFactor ?? 0)
-                .ToList();
+                .GroupBy(f => f.Parent ?? top)
+                .ToDictionary(f => f.Key);
 
-            var paths = new List<IAsyncDisposable>();
-
-            foreach (var group in grouped)
+            async Task HandleFile(VirtualFile file, IExtractedFile sfn)
             {
-                var only = group.Select(f => f.RelativeName);
-                var extracted = await group.Key.StagedFile.ExtractAll(Queue, only);
-                paths.Add(extracted);
-                foreach (var file in group)
-                    file.StagedFile = extracted[file.RelativeName];
-            }
-
-            return async () =>
-            {
-                foreach (var p in paths)
+                if (filesByParent.ContainsKey(file))
+                    sfn.CanMove = false;
+                
+                if (files.Contains(file)) await callback(file, sfn);
+                if (filesByParent.TryGetValue(file, out var children))
                 {
-                    await p.DisposeAsync();
+                    var fileNames = children.ToDictionary(c => c.RelativeName);
+                    try
+                    {
+                        await FileExtractor2.GatheringExtract(queue, sfn,
+                            r => fileNames.ContainsKey(r),
+                            async (rel, csf) =>
+                            {
+                                await HandleFile(fileNames[rel], csf);
+                                return 0;
+                            },
+                            tempFolder: tempFolder,
+                            onlyFiles: fileNames.Keys.ToHashSet());
+                    }
+                    catch (_7zipReturnError)
+                    {
+                        await using var stream = await sfn.GetStream();
+                        var hash = await stream.xxHashAsync();
+                        if (hash != file.Hash)
+                        {
+                            throw new Exception($"File {file.FullPath} is corrupt, please delete it and retry the installation");
+                        }
+                        throw;
+                    }
                 }
-            };
-        }
 
-        public async Task<AsyncDisposableList<VirtualFile>> StageWith(IEnumerable<VirtualFile> files)
-        {
-            return new AsyncDisposableList<VirtualFile>(await Stage(files), files);
+            }
+            updateTracker ??= new StatusUpdateTracker(1);
+            await filesByParent[top].PMap(queue, updateTracker, async file => await HandleFile(file, new ExtractedNativeFile(file.AbsoluteName) {CanMove = false}));
         }
-
 
         #region KnownFiles
 
         private List<HashRelativePath> _knownFiles = new List<HashRelativePath>();
         private Dictionary<Hash, AbsolutePath> _knownArchives = new Dictionary<Hash, AbsolutePath>();
+
         public void AddKnown(IEnumerable<HashRelativePath> known, Dictionary<Hash, AbsolutePath> archives)
         {
             _knownFiles.AddRange(known);

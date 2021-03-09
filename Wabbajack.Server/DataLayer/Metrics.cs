@@ -30,23 +30,24 @@ namespace Wabbajack.Server.DataLayer
         {
             await using var conn = await Open();
             return (await conn.QueryAsync<AggregateMetric>(@"
-                        SELECT d.Date, d.GroupingSubject as Subject, Count(*) as Count FROM 
-                        (select DISTINCT CONVERT(date, Timestamp) as Date, GroupingSubject, Action, MetricsKey from dbo.Metrics) m
-                        RIGHT OUTER JOIN
-                        (SELECT CONVERT(date, DATEADD(DAY, number + 1, dbo.MinMetricDate())) as Date, GroupingSubject, Action
-                        FROM master..spt_values
-                        CROSS JOIN (
-                          SELECT DISTINCT GroupingSubject, Action FROM dbo.Metrics 
-                          WHERE MetricsKey is not null 
-                          AND Subject != 'Default'
-                          AND TRY_CONVERT(uniqueidentifier, Subject) is null) as keys
-                        WHERE type = 'P'
-                        AND DATEADD(DAY, number+1, dbo.MinMetricDate()) <= dbo.MaxMetricDate()) as d
-                        ON m.Date = d.Date AND m.GroupingSubject = d.GroupingSubject AND m.Action = d.Action
-                        WHERE d.Action = @action
-                        AND d.Date >= DATEADD(month, -1, GETUTCDATE())
-                        group by d.Date, d.GroupingSubject, d.Action
-                        ORDER BY d.Date, d.GroupingSubject, d.Action", new {Action = action}))
+                select
+                datefromparts(datepart(YEAR,Timestamp), datepart(MONTH,Timestamp), datepart(DAY,Timestamp)) as Date, 
+                GroupingSubject as Subject,
+                count(*) as Count 
+                from dbo.metrics where 
+                Action = @Action
+                AND GroupingSubject in  (select DISTINCT GroupingSubject from dbo.Metrics
+                 WHERE action = @Action
+                 AND MetricsKey is not null 
+                AND Subject != 'Default'
+                AND Subject != 'untitled'
+                AND TRY_CONVERT(uniqueidentifier, Subject) is null
+                 AND Timestamp >= DATEADD(DAY, -1, GETUTCDATE()))
+                group by
+                 datefromparts(datepart(YEAR,Timestamp), datepart(MONTH,Timestamp), datepart(DAY,Timestamp)),
+                 GroupingSubject
+                 Order by  datefromparts(datepart(YEAR,Timestamp), datepart(MONTH,Timestamp), datepart(DAY,Timestamp)) asc", 
+                    new {Action = action}))
                 .ToList();
         }
 
@@ -69,8 +70,28 @@ namespace Wabbajack.Server.DataLayer
         public async Task<bool> ValidMetricsKey(string metricsKey)
         {
             await using var conn = await Open();
-            return (await conn.QueryAsync<string>("SELECT TOP(1) MetricsKey from Metrics Where MetricsKey = @MetricsKey",
-                new {MetricsKey = metricsKey})).FirstOrDefault() != null;
+            return (await conn.QuerySingleOrDefaultAsync<string>("SELECT TOP(1) MetricsKey from dbo.MetricsKeys Where MetricsKey = @MetricsKey",
+                new {MetricsKey = metricsKey})) != default;
+        }
+
+        public async Task AddMetricsKey(string metricsKey)
+        {
+            await using var conn = await Open();
+            await using var trans = conn.BeginTransaction();
+
+            if ((await conn.QuerySingleOrDefaultAsync<string>(
+                "SELECT TOP(1) MetricsKey from dbo.MetricsKeys Where MetricsKey = @MetricsKey",
+                new {MetricsKey = metricsKey}, trans)) != default)
+                return;
+            
+            await conn.ExecuteAsync("INSERT INTO dbo.MetricsKeys (MetricsKey) VALUES (@MetricsKey)",
+                new {MetricsKey = metricsKey}, trans);
+        }
+
+        public async Task<string[]> AllKeys()
+        {
+            await using var conn = await Open();
+            return (await conn.QueryAsync<string>("SELECT MetricsKey from dbo.MetricsKeys")).ToArray();
         }
 
 
@@ -93,6 +114,73 @@ namespace Wabbajack.Server.DataLayer
                         SELECT JSON_VALUE(Metadata, '$.title') FROM dbo.ModLists
                         WHERE JSON_VALUE(Metadata, '$.links.machineURL') = @MachineURL)",
                 new {MachineURL = machineUrl});
+        }
+
+        public async Task<IEnumerable<(string, long)>> GetTotalInstalls()
+        {
+            await using var conn = await Open();
+            return await conn.QueryAsync<(string, long)>(
+                @"SELECT GroupingSubject, Count(*) as Count
+                        From dbo.Metrics
+                        WHERE 
+
+                        GroupingSubject in  (select DISTINCT GroupingSubject from dbo.Metrics
+                            WHERE action = 'finish_install'
+                            AND MetricsKey is not null)
+	                        group by GroupingSubject
+	                        order by Count(*) desc");
+        }
+        
+        public async Task<IEnumerable<(string, long)>> GetTotalUniqueInstalls()
+        {
+            await using var conn = await Open();
+            return await conn.QueryAsync<(string, long)>(
+                @"Select GroupingSubject, Count(*) as Count
+                        FROM
+                        (select DISTINCT MetricsKey, GroupingSubject
+                        From dbo.Metrics
+                        WHERE 
+                        GroupingSubject in  (select DISTINCT GroupingSubject from dbo.Metrics
+                            WHERE action = 'finish_install'
+                            AND MetricsKey is not null)) m
+                        GROUP BY GroupingSubject
+                        Order by Count(*) desc
+                        ");
+        }
+
+        public async IAsyncEnumerable<MetricRow> MetricsDump()
+        {
+            var keys = new Dictionary<string, long>();
+            
+            await using var conn = await Open();
+            foreach (var row in await conn.QueryAsync<(long, DateTime, string, string, string, string)>(@"select Id, Timestamp, Action, Subject, MetricsKey, GroupingSubject from dbo.metrics WHERE MetricsKey is not null"))
+            {
+                if (!keys.TryGetValue(row.Item5, out var keyid))
+                {
+                    keyid = keys.Count;
+                    keys[row.Item5] = keyid;
+                }
+
+                yield return new MetricRow
+                {
+                    Id = row.Item1,
+                    Timestamp = row.Item2,
+                    Action = row.Item3,
+                    Subject = row.Item4,
+                    MetricsKey = keyid,
+                    GroupingSubject = row.Item6
+                };
+            }
+        }
+
+        public class MetricRow
+        {
+            public long Id;
+            public DateTime Timestamp;
+            public string Action;
+            public string Subject;
+            public string GroupingSubject;
+            public long MetricsKey;
         }
     }
 }

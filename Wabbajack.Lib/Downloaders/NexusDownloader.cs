@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Reactive;
 using System.Reactive.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using F23.StringSimilarity;
 using Newtonsoft.Json;
@@ -64,7 +66,7 @@ namespace Wabbajack.Lib.Downloaders
                     };
                 }
 
-                var client = await NexusApiClient.Get();
+                var client = DownloadDispatcher.GetInstance<NexusDownloader>().Client ?? await NexusApiClient.Get();
                 ModInfo info;
                 try
                 {
@@ -142,6 +144,16 @@ namespace Wabbajack.Lib.Downloaders
             }
         }
 
+        public async Task<bool> HaveEnoughAPICalls(IEnumerable<Archive> archives)
+        {
+            if (await Client!.IsPremium())
+                return true;
+            
+            var count = archives.Select(a => a.State).OfType<State>().Count();
+
+            return count < Client!.RemainingAPICalls;
+        }
+
         [JsonName("NexusDownloader")]
         public class State : AbstractDownloadState, IMetaState, IUpgradingState
         {
@@ -186,25 +198,29 @@ namespace Wabbajack.Lib.Downloaders
                 string url;
                 try
                 {
-                    var client = await NexusApiClient.Get();
-                    url = await client.GetNexusDownloadLink(this);
+                    url = await DownloadDispatcher.GetInstance<NexusDownloader>().Client!.GetNexusDownloadLink(this);
                 }
-                catch (Exception ex)
+                catch (NexusAPIQuotaExceeded ex)
                 {
-                    Utils.Log($"{a.Name} - Error getting Nexus download URL - {ex.Message}");
+                    Utils.Log(ex.ExtendedDescription);
+                    throw;
+                }
+                catch (Exception)
+                {
                     return false;
                 }
-
-                Utils.Log($"Downloading Nexus Archive - {a.Name} - {Game} - {ModID} - {FileID}");
 
                 return await new HTTPDownloader.State(url).Download(a, destination);
             }
 
-            public override async Task<bool> Verify(Archive a)
+            public override async Task<bool> Verify(Archive a, CancellationToken? token = null)
             {
                 try
                 {
-                    var client = await NexusApiClient.Get();
+                    var nclient = DownloadDispatcher.GetInstance<NexusDownloader>();
+                    await nclient.Prepare();
+                    var client = nclient.Client!;
+
                     var modInfo = await client.GetModInfo(Game, ModID);
                     if (!modInfo.available) return false;
                     var modFiles = await client.GetModFiles(Game, ModID);
@@ -239,7 +255,11 @@ namespace Wabbajack.Lib.Downloaders
 
             public override async Task<(Archive? Archive, TempFile NewFile)> FindUpgrade(Archive a, Func<Archive, Task<AbsolutePath>> downloadResolver)
             {
-                var client = await NexusApiClient.Get();
+                var client = DownloadDispatcher.GetInstance<NexusDownloader>().Client ?? await NexusApiClient.Get();
+                await client.IsPremium();
+                
+                if (client.RemainingAPICalls <= 0)
+                    throw new NexusAPIQuotaExceeded();
 
                 var mod = await client.GetModInfo(Game, ModID);
                 if (!mod.available) 
@@ -249,7 +269,7 @@ namespace Wabbajack.Lib.Downloaders
                 var oldFile = files.files.FirstOrDefault(f => f.file_id == FileID);
                 var nl = new Levenshtein();
                 var newFile = files.files.Where(f => f.category_name != null)
-                    .OrderBy(f => nl.Distance(oldFile.name.ToLowerInvariant(), f.name.ToLowerInvariant())).FirstOrDefault();
+                    .OrderBy(f => nl.Distance(oldFile!.name.ToLowerInvariant(), f.name.ToLowerInvariant())).FirstOrDefault();
 
                 if (!mod.available || oldFile == default || newFile == default)
                 {
@@ -270,21 +290,28 @@ namespace Wabbajack.Lib.Downloaders
                 if (fastPath != default)
                 {
                     newArchive.Size = fastPath.Size;
-                    newArchive.Hash = await fastPath.FileHashAsync();
+                    var hash = await fastPath.FileHashAsync();
+                    if (hash == null) return default;
+                    newArchive.Hash = hash.Value;
                     return (newArchive, new TempFile());
                 }
 
+                Utils.Log($"Downloading possible upgrade {newArchive.State.PrimaryKeyString}");
                 var tempFile = new TempFile();
                  
                 await newArchive.State.Download(newArchive, tempFile.Path);
 
                 newArchive.Size = tempFile.Path.Size;
-                newArchive.Hash = await tempFile.Path.FileHashAsync();
+                var newArchiveHash = await tempFile.Path.FileHashAsync();
+                if (newArchiveHash == null) return default;
+                newArchive.Hash = newArchiveHash.Value;
+
+                Utils.Log($"Possible upgrade {newArchive.State.PrimaryKeyString} downloaded");
 
                 return (newArchive, tempFile);
             }
 
-            public async Task<bool> ValidateUpgrade(Hash srcHash, AbstractDownloadState newArchiveState)
+            public override async Task<bool> ValidateUpgrade(Hash srcHash, AbstractDownloadState newArchiveState)
             {
                 var state = (State)newArchiveState;
                 return Game == state.Game && ModID == state.ModID;

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Wabbajack.Common;
@@ -39,8 +40,6 @@ namespace Wabbajack.Lib.Downloaders
             typeof(DeadlyStreamDownloader.State),
             typeof(TESAllianceDownloader.State),
             typeof(TESAllDownloader.State),
-            typeof(BethesdaNetDownloader.State),
-            typeof(YouTubeDownloader.State),
             typeof(YandexDownloader.State),
             typeof(WabbajackCDNDownloader.State)
         };
@@ -91,7 +90,7 @@ namespace Wabbajack.Lib.Downloaders
         /// Returns true if this link is still valid
         /// </summary>
         /// <returns></returns>
-        public abstract Task<bool> Verify(Archive archive);
+        public abstract Task<bool> Verify(Archive archive, CancellationToken? token = null);
 
         public abstract IDownloader GetDownloader();
 
@@ -103,7 +102,7 @@ namespace Wabbajack.Lib.Downloaders
             return string.Join("\n", GetMetaIni());
         }
 
-        public async Task<(Archive? Archive, TempFile NewFile)> ServerFindUpgrade(Archive a)
+        public static async Task<(Archive? Archive, TempFile NewFile)> ServerFindUpgrade(Archive a)
         {
             var alternatives = await ClientAPI.GetModUpgrades(a.Hash);
             if (alternatives == default)

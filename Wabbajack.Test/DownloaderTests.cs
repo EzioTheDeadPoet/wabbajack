@@ -11,9 +11,11 @@ using Wabbajack.Common;
 using Wabbajack.Common.StatusFeed;
 using Wabbajack.Lib;
 using Wabbajack.Lib.Downloaders;
+using Wabbajack.Lib.Http;
 using Wabbajack.Lib.LibCefHelpers;
 using Wabbajack.Lib.NexusApi;
 using Wabbajack.Lib.Validation;
+using Wabbajack.Lib.WebAutomation;
 using Xunit;
 using Xunit.Abstractions;
 using Directory = System.IO.Directory;
@@ -111,6 +113,9 @@ namespace Wabbajack.Test
             Assert.Equal(Hash.FromBase64("eSIyd+KOG3s="), await filename.Path.FileHashAsync());
 
             Assert.Equal("Cheese for Everyone!", await filename.Path.ReadAllTextAsync());
+
+            var newState = (AbstractDownloadState)new GoogleDriveDownloader.State("1Q_CdeYJStfoTZFLZ79RRVkxI2c_cG0dg");
+            Assert.True(await newState.Verify(new Archive(newState) {Size = 0}));
         }
 
         [Fact]
@@ -235,6 +240,7 @@ namespace Wabbajack.Test
                         fileID=35407";
 
             var state = (AbstractDownloadState)await DownloadDispatcher.ResolveArchive(ini.LoadIniString());
+            await DownloadDispatcher.PrepareAll(new[] {state});
 
             Assert.NotNull(state);
 
@@ -280,8 +286,64 @@ namespace Wabbajack.Test
         }
 
         [Fact]
+        public async Task CanFindOtherLLMods()
+        {
+            await DownloadDispatcher.GetInstance<LoversLabDownloader>().Prepare();
+           
+            var ini = @"[General]
+                    directURL=https://www.loverslab.com/files/file/1382-milk-mod-economy/?do=download&r=913360&confirm=1&t=1&csrfKey=7984faa4d27f6b638125daf38ae5f1191";
+
+            var state = (AbstractDownloadState)await DownloadDispatcher.ResolveArchive(ini.LoadIniString());
+            var otherfiles = await ((LoversLabDownloader.State)state).GetFilesInGroup();
+        }
+
+        [Fact]
+        public async Task CanCancelLLValidation()
+        {
+            await using var filename = new TempFile();
+            if (!DownloadDispatcher.GetInstance<LoversLabDownloader>().IsCloudFlareProtected)
+                return;
+            
+            await DownloadDispatcher.GetInstance<LoversLabDownloader>().Prepare();
+
+            var state = new LoversLabDownloader.State
+            {
+                FileName = "14424-books-of-dibella-se-alternate-start-plugin", FileID = "870820",
+            };
+
+            using var queue = new WorkQueue();
+            var tcs = new CancellationTokenSource();
+            tcs.CancelAfter(2);
+            await Assert.ThrowsAsync<TaskCanceledException>(async () =>
+            {
+                await Enumerable.Range(0, 2).PMap(queue,
+                    async x =>
+                    {
+                        Assert.True(await state.Verify(new Archive(state: null!) {Size = 252269}, tcs.Token));
+                    });
+            });
+
+
+
+        }
+
+        [Fact]
+        public async Task CanGetLLMetadata()
+        {
+            await DownloadDispatcher.GetInstance<LoversLabDownloader>().Prepare();
+            var ini = @"[General]
+                        directURL=https://www.loverslab.com/files/file/11116-test-file-for-wabbajack-integration/?do=download&r=737123&confirm=1&t=1";
+
+            var state = (LoversLabDownloader.State)await DownloadDispatcher.ResolveArchive(ini.LoadIniString());
+            Assert.True(await state.LoadMetaData());
+            Assert.Equal("halgari", state.Author);
+        }
+
+        [Fact]
         public async Task LoversLabDownload()
         {
+
+            
             await DownloadDispatcher.GetInstance<LoversLabDownloader>().Prepare();
             var ini = @"[General]
                         directURL=https://www.loverslab.com/files/file/11116-test-file-for-wabbajack-integration/?do=download&r=737123&confirm=1&t=1";
@@ -312,6 +374,8 @@ namespace Wabbajack.Test
             Assert.Equal("Cheese for Everyone!", await filename.Path.ReadAllTextAsync());
 
             var files = await ((LoversLabDownloader.State)converted).GetFilesInGroup();
+
+
             
             Assert.NotEmpty(files);
             Assert.Equal("WABBAJACK_TEST_FILE.zip", files.First().Name);
@@ -407,13 +471,12 @@ namespace Wabbajack.Test
             Assert.Equal("Cheese for Everyone!", await filename.Path.ReadAllTextAsync());
         }
         
-        /* Site is down
         [Fact]
         public async Task TESAllDownloader()
         {
             await DownloadDispatcher.GetInstance<TESAllDownloader>().Prepare();
             const string ini = "[General]\n" +
-                               "directURL=https://tesall.ru/files/getdownload/594545-wabbajack-test-file/";
+                               "directURL=https://tesall.ru/files/download/594545";
 
             var state = (AbstractDownloadState)await DownloadDispatcher.ResolveArchive(ini.LoadIniString());
 
@@ -431,7 +494,6 @@ namespace Wabbajack.Test
 
             Assert.Equal("Cheese for Everyone!", await filename.Path.ReadAllTextAsync());
         }
-        */
 
         /* WAITING FOR APPROVAL BY MODERATOR
          [Fact]
@@ -485,62 +547,6 @@ namespace Wabbajack.Test
             Consts.TestMode = true;
         }
         
-        [Fact]
-        public async Task BethesdaNetDownload()
-        {
-
-            var downloader = DownloadDispatcher.GetInstance<BethesdaNetDownloader>();
-            Assert.True(await downloader.IsLoggedIn.FirstAsync());
-
-            var ini = $@"[General]
-                              directURL=https://bethesda.net/en/mods/skyrim/mod-detail/4145641";
-
-            await using var filename = new TempFile();
-            var state = (AbstractDownloadState)await DownloadDispatcher.ResolveArchive(ini.LoadIniString());
-            Assert.NotNull(state);
-
-            var converted = state.ViaJSON();
-            Assert.True(await converted.Verify(new Archive(state: null!) { Name = "mod.ckm"}));
-
-            Assert.True(converted.IsWhitelisted(new ServerWhitelist { AllowedPrefixes = new List<string>() }));
-
-            await converted.Download(new Archive(state: null!) { Name = "mod.zip" }, filename.Path);
-
-            await using var fs = await filename.Path.OpenRead();
-            using var archive = new ZipArchive(fs);
-            var entries = archive.Entries.Select(e => e.FullName).ToList();
-            Assert.Equal(entries, new List<string> {@"Data\TestCK.esp", @"Data\TestCK.ini"});
-        }
-        
-        /*
-        [Fact]
-        public async Task YoutubeDownloader()
-        {
-
-            var infered_ini = await DownloadDispatcher.Infer(new Uri("https://www.youtube.com/watch?v=4ceowgHn8BE"));
-            Assert.IsAssignableFrom<YouTubeDownloader.State>(infered_ini);
-            Assert.Equal(15, ((YouTubeDownloader.State)infered_ini).Tracks.Count);
-            
-            var ini = string.Join("\n", infered_ini.GetMetaIni());
-            
-            var state = (YouTubeDownloader.State)await DownloadDispatcher.ResolveArchive(ini.LoadIniString());
-            Assert.Equal(15, state.Tracks.Count);
-            Assert.NotNull(state);
-
-            
-            
-            var converted = RoundTripState(state);
-            Assert.True(await converted.Verify(new Archive(state: null!) { Name = "yt_test.zip"}));
-
-            Assert.True(converted.IsWhitelisted(new ServerWhitelist { AllowedPrefixes = new List<string>() }));
-
-            await using var tempFile = new TempFile();
-            await converted.Download(new Archive(state: null!) { Name = "yt_test.zip"}, tempFile.Path);
-            Assert.Equal(Hash.FromBase64("pD7UoVNY4o8="), await tempFile.Path.FileHashAsync());
-        }
-        */
-        
-        
         /// <summary>
         /// Tests that files from different sources don't overwrite eachother when downloaded by AInstaller
         /// </summary>
@@ -585,7 +591,7 @@ namespace Wabbajack.Test
             Assert.Equal(new[]
                 {
                     (RelativePath)@"Download.esm",
-                    (RelativePath)@"Download_ed33cbb256e5328361da8d9227df9cab1bb43a79a87dca2f223b2e2762ccaad1_.esm",
+                    (RelativePath)@"Download_c4047f2251d8eead22df4b4888cc4b833ae7d9a6766ff29128e083d944f9ec4b_.esm",
                 }.OrderBy(a => a).ToArray(),
             folder.EnumerateFiles().Select(f => f.FileName).OrderBy(a => a).ToArray());
            
@@ -625,7 +631,7 @@ namespace Wabbajack.Test
             public TestInstaller(AbsolutePath archive, ModList modList, AbsolutePath outputFolder, AbsolutePath downloadFolder, SystemParameters parameters)
                 : base(archive, modList, outputFolder, downloadFolder, parameters, steps: 1, modList.GameType)
             {
-                Queue.SetActiveThreadsObservable(Observable.Return(1));
+                DesiredThreads.OnNext(1);
             }
 
             protected override Task<bool> _Begin(CancellationToken cancel)

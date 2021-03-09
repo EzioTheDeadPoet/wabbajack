@@ -89,13 +89,13 @@ namespace Wabbajack.Common
         public ValueTask<FileStream> Create()
         {
             var path = _path;
-            return CircuitBreaker.WithAutoRetryAsync<FileStream, IOException>(async () => File.Open(path, FileMode.Create, FileAccess.ReadWrite));
+            return CircuitBreaker.WithAutoRetryAsync<FileStream, IOException>(async () => File.Open(path, FileMode.Create, FileAccess.ReadWrite, FileShare.Read, 1024 * 32));
         }
 
         public ValueTask<FileStream> OpenWrite()
         {
             var path = _path;
-            return CircuitBreaker.WithAutoRetryAsync<FileStream, IOException>(async () => File.OpenWrite(path));
+            return CircuitBreaker.WithAutoRetryAsync<FileStream, IOException>(async () => File.Open(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read, 1024 * 32));
         }
 
         public async Task WriteAllTextAsync(string text)
@@ -171,13 +171,13 @@ namespace Wabbajack.Common
         /// </summary>
         /// <param name="otherPath"></param>
         /// <param name="overwrite">Replace the destination file if it exists</param>
-        public async Task MoveToAsync(AbsolutePath otherPath, bool overwrite = false)
+        public async ValueTask MoveToAsync(AbsolutePath otherPath, bool overwrite = false)
         {
             if (Root != otherPath.Root)
             {
                 if (otherPath.Exists && overwrite)
                     await otherPath.DeleteAsync();
-                
+
                 await CopyToAsync(otherPath);
                 await DeleteAsync();
                 return;
@@ -190,7 +190,7 @@ namespace Wabbajack.Common
         public RelativePath RelativeTo(AbsolutePath p)
         {
             var relPath = Path.GetRelativePath(p._path, _path);
-            if (relPath == _path) 
+            if (relPath == _path)
                 throw new ArgumentException($"{_path} is not a subpath of {p._path}");
             return new RelativePath(relPath);
         }
@@ -262,7 +262,7 @@ namespace Wabbajack.Common
                 // ignore, it doesn't exist so why delete it?
             }
         }
-        
+
         public void Delete()
         {
             if (!IsFile) return;
@@ -275,7 +275,7 @@ namespace Wabbajack.Common
 
         public bool InFolder(AbsolutePath folder)
         {
-            return _path.StartsWith(folder._path + Path.DirectorySeparator);
+            return _path.StartsWith(folder._path + Path.DirectorySeparator, StringComparison.OrdinalIgnoreCase);
         }
 
         public async Task<byte[]> ReadAllBytesAsync()
@@ -310,7 +310,7 @@ namespace Wabbajack.Common
 
         public AbsolutePath Combine(params string[] paths)
         {
-            
+
             return new AbsolutePath(Path.Combine(paths.Cons(_path).ToArray()));
         }
 
@@ -329,6 +329,7 @@ namespace Wabbajack.Common
         {
             await using var fs = await Create();
             await data.CopyToAsync(fs);
+            await data.FlushAsync();
             if (disposeDataAfter) await data.DisposeAsync();
         }
 
@@ -343,9 +344,9 @@ namespace Wabbajack.Common
 
         public async ValueTask HardLinkIfOversize(AbsolutePath destination)
         {
-            if (!destination.Parent.Exists) 
+            if (!destination.Parent.Exists)
                 destination.Parent.CreateDirectory();
-            
+
             if (Root == destination.Root && Consts.SupportedBSAs.Contains(Extension))
             {
                 if (HardLinkTo(destination))
@@ -385,7 +386,7 @@ namespace Wabbajack.Common
 
         public int CompareTo(AbsolutePath other)
         {
-            return string.Compare(_path, other._path, StringComparison.Ordinal);
+            return string.Compare(_path, other._path, StringComparison.OrdinalIgnoreCase);
         }
 
         public string ReadAllText()
@@ -397,14 +398,14 @@ namespace Wabbajack.Common
         {
             var path = _path;
             return CircuitBreaker.WithAutoRetryAsync<FileStream, IOException>(async () =>
-                File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 1048576, useAsync: true));
+                File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 4096, useAsync: true));
         }
 
         public ValueTask<FileStream> WriteShared()
         {
             var path = _path;
             return CircuitBreaker.WithAutoRetryAsync<FileStream, IOException>(async () =>
-                File.Open(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite, bufferSize: 1048576, useAsync: true));
+                File.Open(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite, bufferSize: 4096, useAsync: true));
         }
 
         public async Task CopyDirectoryToAsync(AbsolutePath destination)

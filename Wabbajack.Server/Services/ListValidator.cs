@@ -1,14 +1,10 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc.Filters;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
-using Org.BouncyCastle.Crypto.Digests;
-using RocksDbSharp;
 using Wabbajack.BuildServer;
 using Wabbajack.Common;
 using Wabbajack.Lib;
@@ -27,8 +23,9 @@ namespace Wabbajack.Server.Services
         private NexusKeyMaintainance _nexus;
         private ArchiveMaintainer _archives;
 
-        public IEnumerable<(ModListSummary Summary, DetailedStatus Detailed)> Summaries { get; private set; } =
-            new (ModListSummary Summary, DetailedStatus Detailed)[0];
+        public IEnumerable<(ModListSummary Summary, DetailedStatus Detailed)> Summaries => ValidationInfo.Values.Select(e => (e.Summary, e.Detailed));
+        
+        public ConcurrentDictionary<string, (ModListSummary Summary, DetailedStatus Detailed, TimeSpan ValidationTime)> ValidationInfo = new();
 
 
         public ListValidator(ILogger<ListValidator> logger, AppSettings settings, SqlService sql, DiscordWebHook discord, NexusKeyMaintainance nexus, ArchiveMaintainer archives, QuickSync quickSync) 
@@ -50,8 +47,10 @@ namespace Wabbajack.Server.Services
             var stopwatch = new Stopwatch();
             stopwatch.Start();
 
-            var results = await data.ModLists.PMap(queue, async metadata =>
+            var results = await data.ModLists.Where(m => !m.ForceDown).PMap(queue, async metadata =>
             {
+                var timer = new Stopwatch();
+                timer.Start();
                 var oldSummary =
                     oldSummaries.FirstOrDefault(s => s.Summary.MachineURL == metadata.Links.MachineURL);
                 
@@ -60,6 +59,12 @@ namespace Wabbajack.Server.Services
                 {
                     try
                     {
+                        ReportStarting(archive.State.PrimaryKeyString);
+                        if (timer.Elapsed > Delay)
+                        {
+                            return (archive, ArchiveStatus.InValid);
+                        }
+                        
                         var (_, result) = await ValidateArchive(data, archive);
                         if (result == ArchiveStatus.InValid)
                         {
@@ -68,13 +73,18 @@ namespace Wabbajack.Server.Services
                             return await TryToHeal(data, archive, metadata);
                         }
 
-                        
+
                         return (archive, result);
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, $"During Validation of {archive.Hash} {archive.State.PrimaryKeyString}");
+                        Utils.Log($"Exception in validation of {archive.Hash} {archive.State.PrimaryKeyString} " + ex);
                         return (archive, ArchiveStatus.InValid);
+                    }
+                    finally
+                    {
+                        ReportEnding(archive.State.PrimaryKeyString);
                     }
                 });
 
@@ -108,6 +118,24 @@ namespace Wabbajack.Server.Services
                         ArchiveStatus = a.Item2
                     }).ToList()
                 };
+
+                if (timer.Elapsed > Delay)
+                {
+                    await _discord.Send(Channel.Ham,
+                        new DiscordMessage
+                        {
+                            Embeds = new[]
+                            {
+                                new DiscordEmbed
+                                {
+                                    Title =
+                                        $"Failing {summary.Name} (`{summary.MachineURL}`) because the max validation time expired",
+                                    Url = new Uri(
+                                        $"https://build.wabbajack.org/lists/status/{summary.MachineURL}.html")
+                                }
+                            }
+                        });
+                }
 
                 if (oldSummary != default && oldSummary.Summary.Failed != summary.Failed)
                 {
@@ -151,9 +179,14 @@ namespace Wabbajack.Server.Services
 
                 }
                 
+                timer.Stop();
+                
+
+                
+                ValidationInfo[summary.MachineURL] = (summary, detailed, timer.Elapsed);
+                
                 return (summary, detailed);
             });
-            Summaries = results;
             
             stopwatch.Stop();
             _logger.LogInformation($"Finished Validation in {stopwatch.Elapsed}");
@@ -164,6 +197,7 @@ namespace Wabbajack.Server.Services
         private AsyncLock _healLock = new AsyncLock();
         private async Task<(Archive, ArchiveStatus)> TryToHeal(ValidationData data, Archive archive, ModlistMetadata modList)
         {
+            using var _ = await _healLock.WaitAsync();  
             var srcDownload = await _sql.GetArchiveDownload(archive.State.PrimaryKeyString, archive.Hash, archive.Size);
             if (srcDownload == null || srcDownload.IsFailed == true)
             {
@@ -171,7 +205,7 @@ namespace Wabbajack.Server.Services
                 return (archive, ArchiveStatus.InValid);
             }
 
-            
+         
             var patches = await _sql.PatchesForSource(archive.Hash);
             foreach (var patch in patches)
             {
@@ -186,7 +220,7 @@ namespace Wabbajack.Server.Services
                     return (archive, ArchiveStatus.Updated);
             }
 
-            using var _ = await _healLock.WaitAsync();
+
             var upgradeTime = DateTime.UtcNow;
             _logger.LogInformation($"Validator Finding Upgrade for {archive.Hash} {archive.State.PrimaryKeyString}");
 
@@ -284,6 +318,8 @@ namespace Wabbajack.Server.Services
                     return (archive, ArchiveStatus.Valid);
                 case ModDBDownloader.State _:
                     return (archive, ArchiveStatus.Valid);
+                case GameFileSourceDownloader.State _:
+                    return (archive, ArchiveStatus.Valid);
                 case MediaFireDownloader.State _:
                     return (archive, ArchiveStatus.Valid);
                 default:
@@ -299,7 +335,7 @@ namespace Wabbajack.Server.Services
             }
         }
         
-        private AsyncLock _lock = new AsyncLock();
+        private AsyncLock _lock = new();
 
         public async Task<ArchiveStatus> FastNexusModStats(NexusDownloader.State ns)
         {
@@ -309,7 +345,7 @@ namespace Wabbajack.Server.Services
 
             if (mod == null || files == null)
             {
-                // Aquire the lock
+                // Acquire the lock
                 using var lck = await _lock.WaitAsync();
                 
                 // Check again
@@ -319,11 +355,12 @@ namespace Wabbajack.Server.Services
                 if (mod == null || files == null)
                 {
 
-                    NexusApiClient nexusClient = await _nexus.GetClient();
-                    var queryTime = DateTime.UtcNow;
 
                     try
                     {
+                        NexusApiClient nexusClient = await _nexus.GetClient();
+                        var queryTime = DateTime.UtcNow;
+
                         if (mod == null)
                         {
                             _logger.Log(LogLevel.Information, $"Found missing Nexus mod info {ns.Game} {ns.ModID}");
@@ -331,8 +368,9 @@ namespace Wabbajack.Server.Services
                             {
                                 mod = await nexusClient.GetModInfo(ns.Game, ns.ModID, false);
                             }
-                            catch
+                            catch (Exception ex)
                             {
+                                Utils.Log("Exception in Nexus Validation " + ex);
                                 mod = new ModInfo
                                 {
                                     mod_id = ns.ModID.ToString(),
@@ -345,7 +383,7 @@ namespace Wabbajack.Server.Services
                             {
                                 await _sql.AddNexusModInfo(ns.Game, ns.ModID, queryTime, mod);
                             }
-                            catch (Exception _)
+                            catch (Exception)
                             {
                                 // Could be a PK constraint failure
                             }
@@ -368,13 +406,13 @@ namespace Wabbajack.Server.Services
                             {
                                 await _sql.AddNexusModFiles(ns.Game, ns.ModID, queryTime, files);
                             }
-                            catch (Exception _)
+                            catch (Exception)
                             {
                                 // Could be a PK constraint failure
                             }
                         }
                     }
-                    catch (Exception ex)
+                    catch (Exception)
                     {
                         return ArchiveStatus.InValid;
                     }
